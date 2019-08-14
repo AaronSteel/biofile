@@ -1,11 +1,11 @@
 [package]
 name = "biofile"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Aaron"]
 edition = "2018"
 license = "Apache-2.0"
 description = "A library for reading bioinformatics related files"
-repository = "https://github.com/AaronSteel/biofile.git"
+repository = "https://github.com/Rustinante/biofile"
 
 [dependencies]
 ndarray = {version = "0.12.1"}

@@ -3,16 +3,16 @@ use std::fs::{File, OpenOptions};
 use std::io;
 use std::io::{BufRead, BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 
+use analytic::set::ordered_integer_set::OrderedIntegerSet;
+use analytic::set::traits::{Finite, Set};
+use analytic::traits::ToIterator;
 use ndarray::{Array, Ix2, ShapeBuilder};
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 use rayon::iter::plumbing::{bridge, Consumer, Producer, ProducerCallback, UnindexedConsumer};
 
-use analytic::set::ordered_integer_set::OrderedIntegerSet;
-use analytic::set::traits::{Finite, Set};
-use analytic::traits::ToIterator;
-
 use crate::byte_chunk_iter::ByteChunkIter;
 use crate::error::Error;
+use crate::util::get_buf;
 
 const NUM_PEOPLE_PER_BYTE: usize = 4;
 
@@ -37,15 +37,8 @@ impl PlinkBed {
         [0x6c_u8, 0x1b_u8, 0x01_u8]
     }
 
-    fn get_buf(filename: &str) -> Result<BufReader<File>, Error> {
-        match OpenOptions::new().read(true).open(filename) {
-            Err(io_error) => Err(Error::IO { why: format!("failed to open {}: {}", filename, io_error), io_error }),
-            Ok(f) => Ok(BufReader::new(f))
-        }
-    }
-
     fn get_line_count(filename: &str) -> Result<usize, Error> {
-        let fam_buf = PlinkBed::get_buf(filename)?;
+        let fam_buf = get_buf(filename)?;
         Ok(fam_buf.lines().count())
     }
 
@@ -55,7 +48,7 @@ impl PlinkBed {
     }
 
     pub fn new(bed_filename: &str, bim_filename: &str, fam_filename: &str) -> Result<PlinkBed, Error> {
-        let mut bed_buf = PlinkBed::get_buf(bed_filename)?;
+        let mut bed_buf = get_buf(bed_filename)?;
 
         // check if PLINK bed file has the correct file signature
         let expected_bytes = [0x6c_u8, 0x1b_u8, 0x01_u8];
@@ -193,7 +186,7 @@ impl PlinkBed {
     }
 
     pub fn col_chunk_iter(&self, num_snps_per_iter: usize, range: Option<OrderedIntegerSet<usize>>) -> PlinkColChunkIter {
-        let buf = PlinkBed::get_buf(&self.filepath).unwrap();
+        let buf = get_buf(&self.filepath).unwrap();
         match range {
             Some(range) => PlinkColChunkIter::new(buf,
                                                   range,
@@ -313,7 +306,7 @@ impl PlinkColChunkIter {
     #[inline]
     fn clone_with_range(&self, range: OrderedIntegerSet<usize>) -> PlinkColChunkIter {
         PlinkColChunkIter::new(
-            PlinkBed::get_buf(&self.bed_filename).unwrap(),
+            get_buf(&self.bed_filename).unwrap(),
             range,
             self.num_snps_per_iter,
             self.num_people,
@@ -491,13 +484,12 @@ mod tests {
     use std::io;
     use std::io::Write;
 
+    use analytic::set::ordered_integer_set::OrderedIntegerSet;
+    use analytic::traits::ToIterator;
     use ndarray::{array, Array, s};
     use ndarray_rand::RandomExt;
     use rand::distributions::Uniform;
     use tempfile::NamedTempFile;
-
-    use analytic::set::ordered_integer_set::OrderedIntegerSet;
-    use analytic::traits::ToIterator;
 
     use super::PlinkBed;
 
