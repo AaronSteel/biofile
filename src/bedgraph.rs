@@ -48,7 +48,7 @@ impl<D, E> ToIterator<'_, BedGraphDataLineIter<D>, <BedGraphDataLineIter<D> as I
 ///
 /// The [start, end) is a zero-based left-closed right-open coordinate range
 #[derive(Clone, Debug)]
-pub struct BedGraphDataLine<D: Float>(String, usize, usize, D);
+pub struct BedGraphDataLine<D: Float>(pub String, pub usize, pub usize, pub D);
 
 pub struct BedGraphDataLineIter<D> {
     buf: BufReader<File>,
