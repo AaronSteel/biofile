@@ -192,6 +192,16 @@ impl FilelinePartitions {
             partitions
         }
     }
+
+    pub fn get_ordered_partition_keys(&self) -> Vec<String> {
+        let mut keys: Vec<String> = self.partitions.keys().map(|s| s.to_string()).collect();
+        if keys.iter().filter(|&k| k.parse::<i32>().is_err()).count() > 0 {
+            keys.sort();
+        } else {
+            keys.sort_by_key(|k| k.parse::<i32>().unwrap());
+        }
+        keys
+    }
 }
 
 #[cfg(test)]
