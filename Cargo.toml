@@ -1,6 +1,6 @@
 [package]
 name = "biofile"
-version = "0.1.8"
+version = "0.1.9"
 authors = ["Aaron"]
 edition = "2018"
 license = "Apache-2.0"

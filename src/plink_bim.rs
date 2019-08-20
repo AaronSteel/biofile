@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Lines, Read, Seek, SeekFrom};
 use std::iter::FromIterator;
+use std::slice::Iter;
 
 use analytic::set::ordered_integer_set::OrderedIntegerSet;
 use analytic::traits::Collecting;
@@ -184,23 +185,31 @@ impl PlinkBim {
 #[derive(Clone, Debug)]
 pub struct FilelinePartitions {
     partitions: HashMap<String, OrderedIntegerSet<usize>>,
+    ordered_partition_keys: Vec<String>,
 }
 
 impl FilelinePartitions {
     pub fn new(partitions: HashMap<String, OrderedIntegerSet<usize>>) -> FilelinePartitions {
+        let ordered_partition_keys = FilelinePartitions::get_ordered_keys(&partitions);
         FilelinePartitions {
-            partitions
+            partitions,
+            ordered_partition_keys,
         }
     }
 
-    pub fn get_ordered_partition_keys(&self) -> Vec<String> {
-        let mut keys: Vec<String> = self.partitions.keys().map(|s| s.to_string()).collect();
+    fn get_ordered_keys(partitions: &HashMap<String, OrderedIntegerSet<usize>>) -> Vec<String> {
+        let mut keys: Vec<String> = partitions.keys().map(|s| s.to_string()).collect();
         if keys.iter().filter(|&k| k.parse::<i32>().is_err()).count() > 0 {
             keys.sort();
         } else {
             keys.sort_by_key(|k| k.parse::<i32>().unwrap());
         }
         keys
+    }
+
+    #[inline]
+    pub fn ordered_partition_keys(&self) -> &Vec<String> {
+        &self.ordered_partition_keys
     }
 
     #[inline]
@@ -212,6 +221,28 @@ impl FilelinePartitions {
     pub fn into_hash_map(self) -> HashMap<String, OrderedIntegerSet<usize>> {
         self.partitions
     }
+
+    pub fn iter(&self) -> FilelinePartitionsIter {
+        FilelinePartitionsIter {
+            partitions: &self.partitions,
+            key_iter: self.ordered_partition_keys.iter(),
+        }
+    }
+}
+
+pub struct FilelinePartitionsIter<'a> {
+    partitions: &'a HashMap<String, OrderedIntegerSet<usize>>,
+    key_iter: Iter<'a, String>,
+}
+
+impl<'a> Iterator for FilelinePartitionsIter<'a> {
+    type Item = (&'a str, &'a OrderedIntegerSet<usize>);
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.key_iter.next() {
+            None => None,
+            Some(key) => Some((key, &self.partitions[key]))
+        }
+    }
 }
 
 #[cfg(test)]
@@ -221,7 +252,7 @@ mod tests {
     use std::io::{BufWriter, Write};
 
     use analytic::set::ordered_integer_set::{ContiguousIntegerSet, OrderedIntegerSet};
-    use tempfile::NamedTempFile;
+    use tempfile::{NamedTempFile, TempPath};
 
     use super::PlinkBim;
 
@@ -279,8 +310,7 @@ mod tests {
         assert_eq!(chrom_set, expected);
     }
 
-    #[test]
-    fn test_get_fileline_partitions() {
+    fn create_dummy_bim() -> (TempPath, PlinkBim) {
         let file = NamedTempFile::new().unwrap();
         {
             let mut writer = BufWriter::new(&file);
@@ -295,7 +325,7 @@ mod tests {
                 write_bim_line(&mut writer, &chrom.to_string(), id, *coord, 'A', 'C');
             }
         }
-        let mut bim = PlinkBim::new(file.into_temp_path().to_str().unwrap()).unwrap();
+        let bim = PlinkBim::new(file.into_temp_path().to_str().unwrap()).unwrap();
 
         let partition_file = NamedTempFile::new().unwrap();
         {
@@ -312,7 +342,12 @@ mod tests {
                 writer.write_fmt(format_args!("{} {}\n", id, partition)).unwrap();
             }
         }
-        let partition_file_path = partition_file.into_temp_path();
+        (partition_file.into_temp_path(), bim)
+    }
+
+    #[test]
+    fn test_get_fileline_partitions() {
+        let (partition_file_path, mut bim) = create_dummy_bim();
         let partitions = bim.get_fileline_partitions_from_partition_file(partition_file_path.to_str().unwrap())
                             .unwrap().partitions;
         assert_eq!(partitions.get("p1").unwrap(), &OrderedIntegerSet::from_slice(&[[1, 2], [5, 5], [10, 10], [12, 15]]));
@@ -329,5 +364,18 @@ mod tests {
             writer.write_fmt(format_args!("{} {}\n", "extra_id", "p2")).unwrap();
         }
         assert!(new_bim.get_fileline_partitions_from_partition_file(partition_file_path.to_str().unwrap()).is_err());
+    }
+
+    #[test]
+    fn test_fileline_partitions_iter() {
+        let (partition_file_path, mut bim) = create_dummy_bim();
+        let partitions = bim.get_fileline_partitions_from_partition_file(partition_file_path.to_str().unwrap())
+                            .unwrap();
+        let mut iter = partitions.iter();
+        assert_eq!(iter.next(), Some(("p1", &OrderedIntegerSet::from_slice(&[[1, 2], [5, 5], [10, 10], [12, 15]]))));
+        assert_eq!(iter.next(), Some(("p2", &OrderedIntegerSet::from_slice(&[[3, 4], [6, 6], [8, 8], [17, 17]]))));
+        assert_eq!(iter.next(), Some(("p3", &OrderedIntegerSet::from_slice(&[[0, 0], [7, 7], [11, 11], [16, 16]]))));
+        assert_eq!(iter.next(), Some(("p4", &OrderedIntegerSet::from_slice(&[[9, 9]]))));
+        assert_eq!(iter.next(), None);
     }
 }
