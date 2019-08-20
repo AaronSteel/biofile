@@ -202,6 +202,16 @@ impl FilelinePartitions {
         }
         keys
     }
+
+    #[inline]
+    pub fn to_hash_map(&self) -> HashMap<String, OrderedIntegerSet<usize>> {
+        self.partitions.clone()
+    }
+
+    #[inline]
+    pub fn into_hash_map(self) -> HashMap<String, OrderedIntegerSet<usize>> {
+        self.partitions
+    }
 }
 
 #[cfg(test)]
