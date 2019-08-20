@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Lines, Read, Seek, SeekFrom};
+use std::iter::FromIterator;
 
 use analytic::set::ordered_integer_set::OrderedIntegerSet;
 use analytic::traits::Collecting;
@@ -68,9 +69,22 @@ impl PlinkBim {
         }
     }
 
+    pub fn get_fileline_partitions_or(&self,
+                                      default_partition_name: &str,
+                                      default_partition_range: OrderedIntegerSet<usize>)
+        -> HashMap<String, OrderedIntegerSet<usize>> {
+        match &self.fileline_partitions {
+            None => HashMap::from_iter(vec![
+                (default_partition_name.to_string(), default_partition_range)
+            ].into_iter()),
+            Some(p) => p.clone()
+        }
+    }
+
     /// each line in the partition file has two fields separated by space:
     /// variant_id assigned_partition
-    pub fn get_fileline_partitions_from_partition_file(&mut self, partition_file_path: &str) -> Result<HashMap<PartitionKeyType, OrderedIntegerSet<usize>>, Error> {
+    pub fn get_fileline_partitions_from_partition_file(&mut self, partition_file_path: &str)
+        -> Result<HashMap<PartitionKeyType, OrderedIntegerSet<usize>>, Error> {
         let mut id_to_partition: HashMap<String, PartitionKeyType> = HashMap::new();
         for line in BufReader::new(OpenOptions::new().read(true).open(partition_file_path)?).lines() {
             match PlinkBim::get_id_and_partition_from_partition_fileline_iter(&mut line?.split_whitespace()) {
@@ -171,9 +185,8 @@ mod tests {
     use std::fs::OpenOptions;
     use std::io::{BufWriter, Write};
 
-    use tempfile::NamedTempFile;
-
     use analytic::set::ordered_integer_set::{ContiguousIntegerSet, OrderedIntegerSet};
+    use tempfile::NamedTempFile;
 
     use super::PlinkBim;
 
