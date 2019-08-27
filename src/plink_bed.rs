@@ -5,6 +5,7 @@ use std::io::{BufRead, BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 
 use analytic::set::ordered_integer_set::OrderedIntegerSet;
 use analytic::set::traits::{Finite, Set};
+use analytic::stats::sum_f32;
 use analytic::traits::ToIterator;
 use ndarray::{Array, Ix2, ShapeBuilder};
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
@@ -78,12 +79,12 @@ impl PlinkBed {
     // 10 -> 1 heterozygous
     // 11 -> 0 homozygous for the second allele in the .bim file (usually the major allele)
     pub fn create_bed(arr: &Array<u8, Ix2>, out_path: &str) -> Result<(), Error> {
-        let (num_peope, _num_snps) = arr.dim();
+        let (num_people, _num_snps) = arr.dim();
         let mut buf_writer = BufWriter::new(OpenOptions::new().create(true).truncate(true).write(true).open(out_path)?);
         buf_writer.write(&[0x6c, 0x1b, 0x1])?;
         for col in arr.gencolumns() {
             let mut i = 0;
-            for _ in 0..num_peope / 4 {
+            for _ in 0..num_people / 4 {
                 buf_writer.write(&[
                     PlinkBed::geno_to_lowest_two_bits(col[i])
                         | (PlinkBed::geno_to_lowest_two_bits(col[i + 1]) << 2)
@@ -92,7 +93,7 @@ impl PlinkBed {
                 ])?;
                 i += 4;
             }
-            let remainder = num_peope % 4;
+            let remainder = num_people % 4;
             if remainder > 0 {
                 let mut byte = 0u8;
                 for j in 0..remainder {
@@ -199,6 +200,19 @@ impl PlinkBed {
                                            self.num_people,
                                            &self.filepath)
         }
+    }
+
+    pub fn get_minor_allele_frequencies(&self, chunk_size: Option<usize>) -> Vec<f32> {
+        let num_alleles = (self.num_people * 2) as f32;
+        self.col_chunk_iter(chunk_size.unwrap_or(50), None)
+            .into_par_iter()
+            .flat_map(|snps| {
+                snps.gencolumns()
+                    .into_iter()
+                    .map(|col| sum_f32(col.iter()) / num_alleles)
+                    .collect::<Vec<f32>>()
+            })
+            .collect()
     }
 
     pub fn byte_chunk_iter(&mut self, start_byte_index: usize, end_byte_index_exclusive: usize,
