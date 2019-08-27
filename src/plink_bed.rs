@@ -118,7 +118,7 @@ impl PlinkBed {
         Ok(())
     }
 
-    fn geno_to_lowest_two_bits(geno: u8) -> u8 {
+    pub fn geno_to_lowest_two_bits(geno: u8) -> u8 {
         // 00 -> 2 homozygous for the first allele in the .bim file (usually the minor allele)
         // 01 -> 0 missing genotype
         // 10 -> 1 heterozygous
@@ -128,7 +128,7 @@ impl PlinkBed {
         (not_a << 1) | (not_b & not_a)
     }
 
-    fn lowest_two_bits_to_geno(byte: u8) -> u8 {
+    pub fn lowest_two_bits_to_geno(byte: u8) -> u8 {
         // 00 -> 2 homozygous for the first allele in the .bim file (usually the minor allele)
         // 01 -> 0 missing genotype
         // 10 -> 1 heterozygous
