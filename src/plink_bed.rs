@@ -34,8 +34,14 @@ pub struct PlinkBed {
 }
 
 impl PlinkBed {
+    #[inline]
     pub fn get_magic_bytes() -> [u8; 3] {
         [0x6c_u8, 0x1b_u8, 0x01_u8]
+    }
+
+    #[inline]
+    pub fn get_num_magic_bytes() -> usize {
+        PlinkBed::get_magic_bytes().len()
     }
 
     fn get_line_count(filename: &str) -> Result<usize, Error> {
@@ -52,10 +58,15 @@ impl PlinkBed {
         let mut bed_buf = get_buf(bed_filename)?;
 
         // check if PLINK bed file has the correct file signature
-        let expected_bytes = [0x6c_u8, 0x1b_u8, 0x01_u8];
+        let expected_bytes = PlinkBed::get_magic_bytes();
         let mut magic_bytes = [0u8; 3];
         if let Err(io_error) = bed_buf.read_exact(&mut magic_bytes) {
-            return Err(Error::IO { why: format!("Failed to read the first three bytes of {}: {}", bed_filename, io_error), io_error });
+            return Err(
+                Error::IO {
+                    why: format!("Failed to read the first three bytes of {}: {}", bed_filename, io_error),
+                    io_error,
+                }
+            );
         }
         if magic_bytes != expected_bytes {
             return Err(Error::BadFormat(
@@ -236,11 +247,20 @@ impl PlinkBed {
             .collect()
     }
 
-    pub fn byte_chunk_iter(&mut self, start_byte_index: usize, end_byte_index_exclusive: usize,
-                           chunk_size: usize) -> Result<ByteChunkIter<File>, Error> {
+    pub fn byte_chunk_iter(
+        &self,
+        start_byte_index: usize,
+        end_byte_index_exclusive: usize,
+        chunk_size: usize,
+    ) -> Result<ByteChunkIter<File>, Error> {
         let buf = match OpenOptions::new().read(true).open(&self.filepath) {
             Ok(file) => BufReader::new(file),
-            Err(io_error) => return Err(Error::IO { why: format!("failed to open {}: {}", self.filepath, io_error), io_error }),
+            Err(io_error) => return Err(
+                Error::IO {
+                    why: format!("failed to open {}: {}", self.filepath, io_error),
+                    io_error,
+                }
+            ),
         };
         Ok(ByteChunkIter::new(buf, start_byte_index, end_byte_index_exclusive, chunk_size))
     }
@@ -249,7 +269,9 @@ impl PlinkBed {
     /// wherein the n-th sequence of bytes corresponds to the SNPs for the n-th person
     /// larger values of `snp_byte_chunk_size` lead to faster performance, at the cost of higher memory requirement
     pub fn create_bed_t(&mut self, out_path: &str, snp_byte_chunk_size: usize) -> Result<(), io::Error> {
-        let mut buf_writer = BufWriter::new(OpenOptions::new().create(true).truncate(true).write(true).open(out_path)?);
+        let mut buf_writer = BufWriter::new(
+            OpenOptions::new().create(true).truncate(true).write(true).open(out_path)?
+        );
         let num_bytes_per_person = PlinkBed::usize_div_ceil(self.num_snps, 4);
 
         let people_stride = snp_byte_chunk_size * 4;
@@ -284,6 +306,90 @@ impl PlinkBed {
             }
         }
         Ok(())
+    }
+
+//    pub fn create_dominance_geno_bed(&self, out_path: &str) -> Result<(), Error> {
+//        let mut writer = BufWriter::new(
+//            OpenOptions::new().create(true).truncate(true).write(true).open(out_path)?
+//        );
+//        writer.write(&PlinkBed::get_magic_bytes())?;
+//        let num_magic_bytes = PlinkBed::get_num_magic_bytes();
+//        for bytes in self.byte_chunk_iter(
+//            num_magic_bytes,
+//            num_magic_bytes + self.num_snps * self.num_bytes_per_snp,
+//            self.num_bytes_per_snp,
+//        )? {
+//            let mut out_bytes = vec![0u8; self.num_bytes_per_snp];
+//            writer.write(&out_bytes)?;
+//        }
+//        Ok(())
+//    }
+}
+
+pub struct PlinkSnps {
+    bytes: Vec<u8>,
+    num_snps: usize,
+}
+
+impl PlinkSnps {
+    fn new(bytes: Vec<u8>, num_snps: usize) -> PlinkSnps {
+        assert!(num_snps <= bytes.len() * 4,
+                format!("num_snps ({}) > bytes.len() * 4 = {}", num_snps, bytes.len() * 4));
+        PlinkSnps {
+            bytes,
+            num_snps,
+        }
+    }
+
+    pub fn get_num_snps(&self) -> usize {
+        self.num_snps
+    }
+}
+
+impl ToIterator<'_, PlinkSnpsIter, u8> for PlinkSnps {
+    fn to_iter(&self) -> PlinkSnpsIter {
+        PlinkSnpsIter {
+            bytes: self.bytes.clone(),
+            num_snps: self.num_snps,
+            byte_cursor: 0,
+            cursor: 0,
+        }
+    }
+}
+
+impl IntoIterator for PlinkSnps {
+    type Item = <PlinkSnpsIter as Iterator>::Item;
+    type IntoIter = PlinkSnpsIter;
+    fn into_iter(self) -> Self::IntoIter {
+        PlinkSnpsIter {
+            bytes: self.bytes,
+            num_snps: self.num_snps,
+            byte_cursor: 0,
+            cursor: 0,
+        }
+    }
+}
+
+pub struct PlinkSnpsIter {
+    bytes: Vec<u8>,
+    num_snps: usize,
+    byte_cursor: usize,
+    cursor: usize,
+}
+
+impl Iterator for PlinkSnpsIter {
+    type Item = u8;
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.cursor >= self.num_snps {
+            None
+        } else {
+            let snp = PlinkBed::lowest_two_bits_to_geno(self.bytes[self.byte_cursor] >> (2 * (self.cursor % 4) as u8));
+            self.cursor += 1;
+            if self.cursor % 4 == 0 {
+                self.byte_cursor += 1;
+            }
+            Some(snp)
+        }
     }
 }
 
@@ -527,8 +633,14 @@ mod tests {
     use tempfile::NamedTempFile;
 
     use super::PlinkBed;
+    use crate::plink_bed::PlinkSnps;
 
-    fn create_dummy_bim_fam(bim: &mut NamedTempFile, fam: &mut NamedTempFile, num_people: usize, num_snps: usize) -> Result<(), io::Error> {
+    fn create_dummy_bim_fam(
+        bim: &mut NamedTempFile,
+        fam: &mut NamedTempFile,
+        num_people: usize,
+        num_snps: usize,
+    ) -> Result<(), io::Error> {
         for i in 1..=num_people {
             fam.write_fmt(format_args!("{}\n", i))?;
         }
@@ -601,5 +713,20 @@ mod tests {
         }
         assert_eq!(arr, geno);
     }
-}
 
+    #[test]
+    fn test_plink_snps() {
+        let expected_num_snps = 12;
+        let snps = PlinkSnps::new(
+            vec![0b10_00_11_00, 0b00_00_11_11, 0b11_10_10_10, 0b11001100],
+            expected_num_snps,
+        );
+        let expected: Vec<u8> = vec![2, 0, 2, 1, 0, 0, 2, 2, 1, 1, 1, 0];
+        let mut num_snps = 0;
+        for (s, e) in snps.to_iter().zip(expected.iter()) {
+            assert_eq!(s, *e);
+            num_snps += 1;
+        }
+        assert_eq!(num_snps, expected_num_snps);
+    }
+}
