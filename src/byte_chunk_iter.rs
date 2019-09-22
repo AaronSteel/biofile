@@ -11,7 +11,12 @@ pub struct ByteChunkIter<R> {
 }
 
 impl<R: Seek> ByteChunkIter<R> {
-    pub fn new(mut buf: BufReader<R>, start_byte_index: usize, end_byte_index_exclusive: usize, chunk_size: usize) -> ByteChunkIter<R> {
+    pub fn new(
+        mut buf: BufReader<R>,
+        start_byte_index: usize,
+        end_byte_index_exclusive: usize,
+        chunk_size: usize
+    ) -> ByteChunkIter<R> {
         let offset = buf.seek(SeekFrom::Start(start_byte_index as u64)).unwrap() as usize;
         assert_eq!(offset, start_byte_index);
         ByteChunkIter {
