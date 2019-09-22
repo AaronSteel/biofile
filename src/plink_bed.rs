@@ -18,10 +18,14 @@ use crate::util::get_buf;
 const NUM_PEOPLE_PER_BYTE: usize = 4;
 
 #[inline]
-fn get_num_people_last_byte(total_num_people: usize) -> usize {
-    match total_num_people % NUM_PEOPLE_PER_BYTE {
-        0 => NUM_PEOPLE_PER_BYTE,
-        x => x
+fn get_num_people_last_byte(total_num_people: usize) -> Option<usize> {
+    if total_num_people == 0 {
+        None
+    } else {
+        match total_num_people % NUM_PEOPLE_PER_BYTE {
+            0 => Some(NUM_PEOPLE_PER_BYTE),
+            x => Some(x)
+        }
     }
 }
 
@@ -81,6 +85,12 @@ impl PlinkBed {
         println!("{} stats:\nnum_snps: {}\nnum_people: {}\nnum_bytes_per_block: {}\n----------",
                  bed_filename, num_snps, num_people, num_bytes_per_snp);
 
+        if num_snps == 0 {
+            return Err(Error::Generic("cannot create PlinkBed with 0 SNPs".to_string()));
+        }
+        if num_people == 0 {
+            return Err(Error::Generic("cannot create PlinkBed with 0 people".to_string()));
+        }
         Ok(PlinkBed { bed_buf, num_people, num_snps, num_bytes_per_snp, filepath: bed_filename.to_string() })
     }
 
@@ -168,9 +178,6 @@ impl PlinkBed {
     ) -> Result<Array<f32, Ix2>, Error> {
         let mut bed_buf = self.get_buf_pointed_to_first_snp()?;
 
-        let last_byte_index = self.num_bytes_per_snp - 1;
-        let num_people_last_byte = get_num_people_last_byte(self.num_people);
-
         let num_snps = match &snps_range {
             None => self.num_snps,
             Some(range) => range.size()
@@ -178,35 +185,37 @@ impl PlinkBed {
         let mut v = Vec::with_capacity(self.num_people * num_snps);
         let mut vi = 0usize;
 
-        let mut snp_bytes = vec![0u8; self.num_bytes_per_snp];
-        match snps_range {
-            None => {
-                unsafe {
-                    v.set_len(self.num_people * num_snps);
-                }
-                for _ in 0..self.num_snps {
-                    bed_buf.read_exact(&mut snp_bytes)?;
-                    for i in 0..last_byte_index {
-                        v[vi] = PlinkBed::lowest_two_bits_to_geno(snp_bytes[i]) as f32;
-                        v[vi + 1] = PlinkBed::lowest_two_bits_to_geno(snp_bytes[i] >> 2) as f32;
-                        v[vi + 2] = PlinkBed::lowest_two_bits_to_geno(snp_bytes[i] >> 4) as f32;
-                        v[vi + 3] = PlinkBed::lowest_two_bits_to_geno(snp_bytes[i] >> 6) as f32;
-                        vi += 4;
+        if let Some(num_people_last_byte) = get_num_people_last_byte(self.num_people) {
+            let last_byte_index = self.num_bytes_per_snp - 1;
+            let mut snp_bytes = vec![0u8; self.num_bytes_per_snp];
+            match snps_range {
+                None => {
+                    unsafe {
+                        v.set_len(self.num_people * num_snps);
                     }
-                    // last byte
-                    for k in 0..num_people_last_byte {
-                        v[vi] = PlinkBed::lowest_two_bits_to_geno(snp_bytes[last_byte_index] >> (k << 1)) as f32;
-                        vi += 1;
+                    for _ in 0..self.num_snps {
+                        bed_buf.read_exact(&mut snp_bytes)?;
+                        for i in 0..last_byte_index {
+                            v[vi] = PlinkBed::lowest_two_bits_to_geno(snp_bytes[i]) as f32;
+                            v[vi + 1] = PlinkBed::lowest_two_bits_to_geno(snp_bytes[i] >> 2) as f32;
+                            v[vi + 2] = PlinkBed::lowest_two_bits_to_geno(snp_bytes[i] >> 4) as f32;
+                            v[vi + 3] = PlinkBed::lowest_two_bits_to_geno(snp_bytes[i] >> 6) as f32;
+                            vi += 4;
+                        }
+                        // last byte
+                        for k in 0..num_people_last_byte {
+                            v[vi] = PlinkBed::lowest_two_bits_to_geno(snp_bytes[last_byte_index] >> (k << 1)) as f32;
+                            vi += 1;
+                        }
                     }
                 }
-            }
-            Some(range) => {
-                for snp_chunk in self.col_chunk_iter(1000, Some(range)) {
-                    v.extend_from_slice(snp_chunk.t().to_owned().as_slice().unwrap());
+                Some(range) => {
+                    for snp_chunk in self.col_chunk_iter(1000, Some(range)) {
+                        v.extend_from_slice(snp_chunk.t().to_owned().as_slice().unwrap());
+                    }
                 }
-            }
-        };
-
+            };
+        }
         let geno_arr = Array::from_shape_vec(
             (self.num_people, num_snps).strides((1, self.num_people)),
             v,
@@ -221,16 +230,22 @@ impl PlinkBed {
     ) -> PlinkColChunkIter {
         let buf = get_buf(&self.filepath).unwrap();
         match range {
-            Some(range) => PlinkColChunkIter::new(buf,
-                                                  range,
-                                                  num_snps_per_iter,
-                                                  self.num_people,
-                                                  &self.filepath),
-            None => PlinkColChunkIter::new(buf,
-                                           OrderedIntegerSet::from_slice(&[[0, self.num_snps - 1]]),
-                                           num_snps_per_iter,
-                                           self.num_people,
-                                           &self.filepath)
+            Some(range) => PlinkColChunkIter::new(
+                buf,
+                range,
+                num_snps_per_iter,
+                self.num_people,
+                &self.filepath,
+            ),
+            None => {
+                PlinkColChunkIter::new(
+                    buf,
+                    OrderedIntegerSet::from_slice(&[[0, self.num_snps - 1]]),
+                    num_snps_per_iter,
+                    self.num_people,
+                    &self.filepath,
+                )
+            }
         }
     }
 
@@ -308,22 +323,30 @@ impl PlinkBed {
         Ok(())
     }
 
-//    pub fn create_dominance_geno_bed(&self, out_path: &str) -> Result<(), Error> {
-//        let mut writer = BufWriter::new(
-//            OpenOptions::new().create(true).truncate(true).write(true).open(out_path)?
-//        );
-//        writer.write(&PlinkBed::get_magic_bytes())?;
-//        let num_magic_bytes = PlinkBed::get_num_magic_bytes();
-//        for bytes in self.byte_chunk_iter(
-//            num_magic_bytes,
-//            num_magic_bytes + self.num_snps * self.num_bytes_per_snp,
-//            self.num_bytes_per_snp,
-//        )? {
-//            let mut out_bytes = vec![0u8; self.num_bytes_per_snp];
-//            writer.write(&out_bytes)?;
-//        }
-//        Ok(())
-//    }
+    pub fn create_dominance_geno_bed(&self, out_path: &str) -> Result<(), Error> {
+        let mut writer = BufWriter::new(
+            OpenOptions::new().create(true).truncate(true).write(true).open(out_path)?
+        );
+        writer.write(&PlinkBed::get_magic_bytes())?;
+        let num_magic_bytes = PlinkBed::get_num_magic_bytes();
+        for bytes in self.byte_chunk_iter(
+            num_magic_bytes,
+            num_magic_bytes + self.num_snps * self.num_bytes_per_snp,
+            self.num_bytes_per_snp,
+        )? {
+            let out_bytes = PlinkSnps::from_geno(
+                PlinkSnps::new(bytes, self.num_people)
+                    .into_iter()
+                    .map(|s| match s {
+                        2 => 1,
+                        s => s,
+                    })
+                    .collect()
+            ).into_bytes();
+            writer.write(&out_bytes)?;
+        }
+        Ok(())
+    }
 }
 
 pub struct PlinkSnps {
@@ -332,7 +355,7 @@ pub struct PlinkSnps {
 }
 
 impl PlinkSnps {
-    fn new(bytes: Vec<u8>, num_snps: usize) -> PlinkSnps {
+    pub fn new(bytes: Vec<u8>, num_snps: usize) -> PlinkSnps {
         assert!(num_snps <= bytes.len() * 4,
                 format!("num_snps ({}) > bytes.len() * 4 = {}", num_snps, bytes.len() * 4));
         PlinkSnps {
@@ -341,8 +364,43 @@ impl PlinkSnps {
         }
     }
 
+    pub fn from_geno(geno: Vec<u8>) -> PlinkSnps {
+        let num_bytes = PlinkBed::usize_div_ceil(geno.len(), 4);
+        let mut bytes: Vec<u8> = Vec::with_capacity(num_bytes);
+        let mut snp_index = 0;
+        if let Some(num_people_last_byte) = get_num_people_last_byte(geno.len()) {
+            for _ in 0..num_bytes - 1 {
+                bytes.push(
+                    PlinkBed::geno_to_lowest_two_bits(geno[snp_index])
+                        | (PlinkBed::geno_to_lowest_two_bits(geno[snp_index + 1]) << 2)
+                        | (PlinkBed::geno_to_lowest_two_bits(geno[snp_index + 2]) << 4)
+                        | (PlinkBed::geno_to_lowest_two_bits(geno[snp_index + 3]) << 6)
+                );
+                snp_index += 4;
+            }
+            // last byte
+            let mut last_byte = 0u8;
+            for j in 0..num_people_last_byte {
+                last_byte |= PlinkBed::geno_to_lowest_two_bits(geno[snp_index + j]) << (j * 2);
+            }
+            bytes.push(last_byte);
+        }
+        PlinkSnps::new(bytes, geno.len())
+    }
+
+    #[inline]
     pub fn get_num_snps(&self) -> usize {
         self.num_snps
+    }
+
+    #[inline]
+    pub fn to_bytes(&self) -> &Vec<u8> {
+        &self.bytes
+    }
+
+    #[inline]
+    pub fn into_bytes(self) -> Vec<u8> {
+        self.bytes
     }
 }
 
@@ -457,7 +515,7 @@ impl PlinkColChunkIter {
 
     fn read_chunk(&mut self, chunk_size: usize) -> Array<f32, Ix2> {
         let num_bytes_per_snp = self.num_bytes_per_snp();
-        let num_people_last_byte = get_num_people_last_byte(self.num_people);
+        let num_people_last_byte = get_num_people_last_byte(self.num_people).unwrap_or(0);
 
         let snp_indices = self.range.slice(self.range_cursor..self.range_cursor + chunk_size);
         self.range_cursor += chunk_size;
@@ -627,7 +685,7 @@ mod tests {
 
     use analytic::set::ordered_integer_set::OrderedIntegerSet;
     use analytic::traits::ToIterator;
-    use ndarray::{array, Array, s};
+    use ndarray::{array, Array, Ix2, s};
     use ndarray_rand::RandomExt;
     use rand::distributions::Uniform;
     use tempfile::NamedTempFile;
@@ -652,22 +710,73 @@ mod tests {
 
     #[test]
     fn test_create_bed() {
-        let geno = array![
-            [0,0,1,2],
-            [1,1,2,1],
-            [2,0,0,0],
-            [1,0,0,2],
-            [0,2,1,0]
-        ];
-        let mut bim = NamedTempFile::new().unwrap();
-        let mut fam = NamedTempFile::new().unwrap();
-        create_dummy_bim_fam(&mut bim, &mut fam, geno.dim().0, geno.dim().1).unwrap();
-        let path = NamedTempFile::new().unwrap().into_temp_path().to_str().unwrap().to_string();
-        PlinkBed::create_bed(&geno, &path).unwrap();
-        let geno_bed = PlinkBed::new(&path,
-                                     bim.into_temp_path().to_str().unwrap(),
-                                     fam.into_temp_path().to_str().unwrap()).unwrap();
-        assert_eq!(geno.mapv(|x| x as f32), geno_bed.get_genotype_matrix(None).unwrap());
+        fn test(geno: &Array<u8, Ix2>) {
+            let mut bim = NamedTempFile::new().unwrap();
+            let mut fam = NamedTempFile::new().unwrap();
+            create_dummy_bim_fam(&mut bim, &mut fam, geno.dim().0, geno.dim().1).unwrap();
+            let path = NamedTempFile::new().unwrap().into_temp_path().to_str().unwrap().to_string();
+            PlinkBed::create_bed(&geno, &path).unwrap();
+            let geno_bed = PlinkBed::new(&path,
+                                         bim.into_temp_path().to_str().unwrap(),
+                                         fam.into_temp_path().to_str().unwrap()).unwrap();
+            assert_eq!(geno.mapv(|x| x as f32), geno_bed.get_genotype_matrix(None).unwrap());
+        }
+        test(&array![
+            [0],
+        ]);
+        test(&array![
+            [1],
+        ]);
+        test(&array![
+            [2],
+        ]);
+        test(&array![
+            [0, 1, 2],
+        ]);
+        test(&array![
+            [0],
+            [1],
+            [2],
+        ]);
+        test(&array![
+            [0, 0, 1],
+            [1, 1, 2],
+            [0, 2, 1],
+        ]);
+        test(&array![
+            [0, 0, 1, 2],
+            [1, 1, 2, 1],
+            [2, 0, 0, 0],
+            [1, 0, 0, 2],
+            [0, 2, 1, 0],
+        ]);
+        test(&array![
+            [0, 0, 1, 2, 1],
+            [1, 1, 2, 1, 2],
+            [2, 0, 0, 0, 0],
+            [1, 0, 0, 2, 2],
+            [0, 2, 1, 0, 1],
+        ]);
+        test(&array![
+            [0, 0, 1, 2, 1],
+            [1, 0, 0, 2, 1],
+            [2, 0, 2, 0, 0],
+            [1, 1, 0, 2, 2],
+            [0, 2, 2, 1, 1],
+            [2, 1, 2, 0, 0],
+            [1, 2, 0, 1, 2],
+            [2, 0, 1, 0, 1],
+        ]);
+        test(&array![
+            [0, 0, 1, 2, 1, 2, 2, 0],
+            [1, 0, 0, 2, 1, 2, 1, 1],
+            [2, 0, 2, 0, 0, 0, 2, 1],
+            [1, 1, 0, 2, 2, 1, 1, 1],
+            [0, 2, 2, 1, 1, 2, 0, 2],
+            [2, 1, 2, 0, 0, 0, 2, 2],
+            [1, 2, 0, 1, 2, 1, 1, 0],
+            [2, 0, 1, 0, 1, 0, 0, 2],
+        ]);
     }
 
     #[test]
@@ -728,5 +837,116 @@ mod tests {
             num_snps += 1;
         }
         assert_eq!(num_snps, expected_num_snps);
+    }
+
+    #[test]
+    fn test_plink_snps_from_geno() {
+        fn test(geno: Vec<u8>) {
+            let plink_snps = PlinkSnps::from_geno(geno.clone());
+            let num_snps = geno.len();
+            let mut iter = plink_snps.into_iter();
+            for i in 0..num_snps {
+                assert_eq!(Some(geno[i]), iter.next());
+            }
+            assert_eq!(None, iter.next());
+        }
+        test(vec![]);
+        test(vec![0]);
+        test(vec![1]);
+        test(vec![2]);
+        test(vec![0, 1, 1]);
+        test(vec![2, 2, 0, 1]);
+        test(vec![1, 2, 0, 1, 1, 0]);
+        test(vec![1, 2, 0, 1, 1, 0, 2, 1]);
+        test(vec![1, 2, 2, 0, 0, 1, 0, 0, 2, 0]);
+    }
+
+    #[test]
+    fn test_create_dominance_geno_bed() {
+        fn test(geno: &Array<u8, Ix2>) {
+            let mut bim = NamedTempFile::new().unwrap();
+            let mut fam = NamedTempFile::new().unwrap();
+            create_dummy_bim_fam(&mut bim, &mut fam, geno.dim().0, geno.dim().1).unwrap();
+            let bed_path = NamedTempFile::new().unwrap().into_temp_path().to_str().unwrap().to_string();
+            let bim_path = bim.into_temp_path();
+            let fam_path = fam.into_temp_path();
+            PlinkBed::create_bed(&geno, &bed_path).unwrap();
+            let geno_bed = PlinkBed::new(
+                &bed_path,
+                bim_path.to_str().unwrap(),
+                fam_path.to_str().unwrap(),
+            ).unwrap();
+            let dominance_path = NamedTempFile::new().unwrap().into_temp_path();
+            geno_bed.create_dominance_geno_bed(dominance_path.to_str().unwrap()).unwrap();
+            let dominance_geno = PlinkBed::new(
+                dominance_path.to_str().unwrap(),
+                bim_path.to_str().unwrap(),
+                fam_path.to_str().unwrap(),
+            ).unwrap();
+            assert_eq!(
+                geno_bed.get_genotype_matrix(None)
+                        .unwrap()
+                        .mapv(|s| match s as u8 {
+                            2 => 1u8,
+                            s => s,
+                        }),
+                dominance_geno.get_genotype_matrix(None)
+                              .unwrap()
+                              .mapv(|s| s as u8)
+            );
+        }
+        test(
+            &array![
+            [0, 0, 1, 2],
+            [1, 1, 2, 1],
+            [2, 0, 0, 0],
+            [1, 0, 0, 2],
+            [0, 2, 1, 0],
+        ]);
+
+        test(
+            &array![
+            [0, 0, 1, 2, 2],
+            [1, 1, 2, 1, 0],
+            [2, 0, 0, 0, 2],
+            [1, 0, 0, 2, 1],
+            [0, 2, 1, 0, 1],
+        ]);
+
+        test(
+            &array![
+            [0, 0, 1, 2, 2],
+            [1, 1, 2, 1, 0],
+            [2, 0, 0, 0, 2],
+            [1, 0, 0, 2, 1],
+            [0, 1, 2, 1, 2],
+            [2, 1, 2, 0, 1],
+            [1, 0, 1, 1, 0],
+            [2, 1, 0, 2, 0],
+        ]);
+
+        test(
+            &array![
+            [0, 0, 1, 2, 2, 1, 1, 0],
+            [1, 1, 2, 1, 0, 0, 0, 0],
+            [2, 0, 0, 0, 2, 1, 0, 1],
+            [1, 0, 0, 2, 1, 1, 2, 0],
+            [0, 1, 2, 1, 2, 1, 1, 2],
+            [2, 1, 2, 0, 1, 0, 2, 0],
+            [1, 0, 1, 1, 0, 0, 0, 2],
+            [2, 1, 0, 2, 0, 0, 1, 1],
+        ]);
+
+        test(
+            &array![
+            [0, 0, 1, 2, 2, 1, 1, 0, 2],
+            [1, 1, 2, 1, 0, 0, 0, 0, 1],
+            [2, 0, 0, 0, 2, 1, 0, 1, 1],
+            [1, 0, 0, 2, 1, 1, 2, 0, 2],
+            [0, 1, 2, 1, 2, 1, 1, 2, 2],
+            [2, 1, 2, 0, 1, 0, 2, 0, 0],
+            [1, 0, 1, 1, 0, 0, 0, 2, 0],
+            [2, 1, 0, 2, 0, 0, 1, 1, 2],
+        ]);
     }
 }

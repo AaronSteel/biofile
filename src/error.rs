@@ -28,7 +28,7 @@ impl fmt::Debug for Error {
 
 impl From<io::Error> for Error {
     fn from(io_error: io::Error) -> Error {
-        Error::IO { why: "IO error".to_string(), io_error }
+        Error::IO { why: io_error.to_string(), io_error }
     }
 }
 
