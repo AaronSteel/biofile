@@ -15,6 +15,8 @@ use crate::byte_chunk_iter::ByteChunkIter;
 use crate::error::Error;
 use crate::util::get_buf;
 
+pub const MAGIC_BYTES: [u8; 3] = [0x6c_u8, 0x1b_u8, 0x01_u8];
+pub const NUM_MAGIC_BYTES: usize = 3;
 const NUM_PEOPLE_PER_BYTE: usize = 4;
 
 #[inline]
@@ -30,7 +32,6 @@ fn get_num_people_last_byte(total_num_people: usize) -> Option<usize> {
 }
 
 pub struct PlinkBed {
-    bed_buf: BufReader<File>,
     pub num_people: usize,
     pub num_snps: usize,
     pub num_bytes_per_snp: usize,
@@ -40,12 +41,12 @@ pub struct PlinkBed {
 impl PlinkBed {
     #[inline]
     pub fn get_magic_bytes() -> [u8; 3] {
-        [0x6c_u8, 0x1b_u8, 0x01_u8]
+        MAGIC_BYTES
     }
 
     #[inline]
     pub fn get_num_magic_bytes() -> usize {
-        PlinkBed::get_magic_bytes().len()
+        NUM_MAGIC_BYTES
     }
 
     fn get_line_count(filename: &str) -> Result<usize, Error> {
@@ -58,32 +59,36 @@ impl PlinkBed {
         a / divisor + (a % divisor != 0) as usize
     }
 
-    pub fn new(bed_filename: &str, bim_filename: &str, fam_filename: &str) -> Result<PlinkBed, Error> {
-        let mut bed_buf = get_buf(bed_filename)?;
+    fn verify_magic_bytes(bed_filepath: &str) -> Result<(), Error> {
+        let mut bed_buf = get_buf(bed_filepath)?;
 
         // check if PLINK bed file has the correct file signature
-        let expected_bytes = PlinkBed::get_magic_bytes();
         let mut magic_bytes = [0u8; 3];
         if let Err(io_error) = bed_buf.read_exact(&mut magic_bytes) {
             return Err(
                 Error::IO {
-                    why: format!("Failed to read the first three bytes of {}: {}", bed_filename, io_error),
+                    why: format!("Failed to read the first three bytes of {}: {}", bed_filepath, io_error),
                     io_error,
                 }
             );
         }
+        let expected_bytes = PlinkBed::get_magic_bytes();
         if magic_bytes != expected_bytes {
-            return Err(Error::BadFormat(
-                format!("The first three bytes of the PLINK bed file are supposed to be 0x{:x?}, but found 0x{:x?}",
-                        expected_bytes, magic_bytes)
-            ));
+            return Err(Error::BadFormat(format!(
+                "The first three bytes of the PLINK bed file {} are supposed to be 0x{:x?}, but found 0x{:x?}",
+                bed_filepath, expected_bytes, magic_bytes
+            )));
         }
+        Ok(())
+    }
 
-        let num_people = PlinkBed::get_line_count(fam_filename)?;
-        let num_snps = PlinkBed::get_line_count(bim_filename)?;
+    pub fn new(bed_filepath: &str, bim_filepath: &str, fam_filepath: &str) -> Result<PlinkBed, Error> {
+        PlinkBed::verify_magic_bytes(bed_filepath)?;
+        let num_people = PlinkBed::get_line_count(fam_filepath)?;
+        let num_snps = PlinkBed::get_line_count(bim_filepath)?;
         let num_bytes_per_snp = PlinkBed::usize_div_ceil(num_people, 4);
         println!("{} stats:\nnum_snps: {}\nnum_people: {}\nnum_bytes_per_block: {}\n----------",
-                 bed_filename, num_snps, num_people, num_bytes_per_snp);
+                 bed_filepath, num_snps, num_people, num_bytes_per_snp);
 
         if num_snps == 0 {
             return Err(Error::Generic("cannot create PlinkBed with 0 SNPs".to_string()));
@@ -91,7 +96,7 @@ impl PlinkBed {
         if num_people == 0 {
             return Err(Error::Generic("cannot create PlinkBed with 0 people".to_string()));
         }
-        Ok(PlinkBed { bed_buf, num_people, num_snps, num_bytes_per_snp, filepath: bed_filename.to_string() })
+        Ok(PlinkBed { num_people, num_snps, num_bytes_per_snp, filepath: bed_filepath.to_string() })
     }
 
     // the first person is the lowest two bits
@@ -126,9 +131,9 @@ impl PlinkBed {
         Ok(())
     }
 
-    pub fn reset_bed_buf(&mut self) -> Result<(), io::Error> {
+    pub fn reset_bed_buf<B: Seek>(buf: &mut B) -> Result<(), io::Error> {
         // the first three bytes are the file signature
-        self.bed_buf.seek(SeekFrom::Start(3))?;
+        buf.seek(SeekFrom::Start(NUM_MAGIC_BYTES as u64))?;
         Ok(())
     }
 
@@ -146,9 +151,14 @@ impl PlinkBed {
 
     /// makes the BufReader point to the start of the byte containing the SNP i individual j
     /// 0-indexing
-    fn seek_to_byte_containing_snp_i_person_j(&mut self, snp_i: usize, person_j: usize) -> Result<(), io::Error> {
-        // the first three bytes are the file signature
-        self.bed_buf.seek(SeekFrom::Start((3 + self.num_bytes_per_snp * snp_i + person_j / 4) as u64))?;
+    fn seek_to_byte_containing_snp_i_person_j<B: Seek>(
+        buf: &mut B,
+        snp_i: usize,
+        person_j: usize,
+        num_bytes_per_snp: usize,
+    ) -> Result<(), io::Error> {
+        // the first NUM_MAGIC_BYTES bytes are the file signature
+        buf.seek(SeekFrom::Start((NUM_MAGIC_BYTES + num_bytes_per_snp * snp_i + person_j / 4) as u64))?;
         Ok(())
     }
 
@@ -283,7 +293,8 @@ impl PlinkBed {
     /// save the transpose of the BED file into `out_path`, which should have an extension of .bedt
     /// wherein the n-th sequence of bytes corresponds to the SNPs for the n-th person
     /// larger values of `snp_byte_chunk_size` lead to faster performance, at the cost of higher memory requirement
-    pub fn create_bed_t(&mut self, out_path: &str, snp_byte_chunk_size: usize) -> Result<(), io::Error> {
+    pub fn create_bed_t(&mut self, out_path: &str, snp_byte_chunk_size: usize) -> Result<(), Error> {
+        let mut bed_buf = get_buf(&self.filepath)?;
         let mut buf_writer = BufWriter::new(
             OpenOptions::new().create(true).truncate(true).write(true).open(out_path)?
         );
@@ -301,17 +312,17 @@ impl PlinkBed {
             }
             let relative_seek_offset = (self.num_bytes_per_snp - snp_bytes.len()) as i64;
             // read 4 SNPs to the buffers at a time
-            self.seek_to_byte_containing_snp_i_person_j(0, j)?;
+            PlinkBed::seek_to_byte_containing_snp_i_person_j(&mut bed_buf, 0, j, self.num_bytes_per_snp)?;
             for (snp_byte_index, k) in (0..self.num_snps).step_by(4).enumerate() {
                 for (snp_offset, _) in (k..min(k + 4, self.num_snps)).enumerate() {
-                    self.bed_buf.read_exact(&mut snp_bytes)?;
+                    bed_buf.read_exact(&mut snp_bytes)?;
                     for w in 0..snp_bytes.len() {
                         people_buf[w + 0][snp_byte_index] |= (snp_bytes[w] & 0b11) << (snp_offset << 1);
                         people_buf[w + 1][snp_byte_index] |= ((snp_bytes[w] >> 2) & 0b11) << (snp_offset << 1);
                         people_buf[w + 2][snp_byte_index] |= ((snp_bytes[w] >> 4) & 0b11) << (snp_offset << 1);
                         people_buf[w + 3][snp_byte_index] |= ((snp_bytes[w] >> 6) & 0b11) << (snp_offset << 1);
                     }
-                    self.bed_buf.seek_relative(relative_seek_offset)?;
+                    bed_buf.seek_relative(relative_seek_offset)?;
                 }
             }
             for (p, buf) in people_buf.iter().enumerate() {
@@ -328,10 +339,9 @@ impl PlinkBed {
             OpenOptions::new().create(true).truncate(true).write(true).open(out_path)?
         );
         writer.write(&PlinkBed::get_magic_bytes())?;
-        let num_magic_bytes = PlinkBed::get_num_magic_bytes();
         for bytes in self.byte_chunk_iter(
-            num_magic_bytes,
-            num_magic_bytes + self.num_snps * self.num_bytes_per_snp,
+            NUM_MAGIC_BYTES,
+            NUM_MAGIC_BYTES + self.num_snps * self.num_bytes_per_snp,
             self.num_bytes_per_snp,
         )? {
             let out_bytes = PlinkSnps::from_geno(
@@ -483,6 +493,8 @@ impl PlinkColChunkIter {
         };
         if let Some(start) = first {
             iter.seek_to_snp(start).unwrap();
+        } else {
+            iter.seek_to_snp(0).unwrap();
         }
         iter
     }
@@ -494,10 +506,14 @@ impl PlinkColChunkIter {
 
     fn seek_to_snp(&mut self, snp_index: usize) -> Result<(), Error> {
         if !self.range.contains(snp_index) {
-            return Err(Error::Generic(format!("SNP index {} is not in the interator range", snp_index)));
+            return Err(Error::Generic(format!("SNP index {} is not in the iterator range", snp_index)));
         }
-        // skip the first 3 magic bytes
-        self.buf.seek(SeekFrom::Start(3 + (self.num_bytes_per_snp() * snp_index) as u64)).unwrap();
+        // skip the first NUM_MAGIC_BYTES magic bytes
+        self.buf.seek(
+            SeekFrom::Start(
+                NUM_MAGIC_BYTES as u64 + (self.num_bytes_per_snp() * snp_index) as u64
+            )
+        ).unwrap();
         Ok(())
     }
 
