@@ -1,4 +1,5 @@
 use std::cmp::min;
+use std::collections::HashSet;
 use std::fs::{File, OpenOptions};
 use std::io;
 use std::io::{BufRead, BufReader, BufWriter, Read, Seek, SeekFrom, Write};
@@ -59,17 +60,18 @@ impl PlinkBed {
             .collect::<Result<Vec<usize>, Error>>()?;
 
         let num_people: usize = {
-            let num_people: Vec<usize> = bfile_path_list
+            let num_people_set: HashSet<usize> = bfile_path_list
                 .iter()
                 .map(|t| Ok(get_line_count(&t.2)?))
-                .collect::<Result<Vec<usize>, Error>>()?;
-            if num_people.len() > 1 {
+                .collect::<Result<HashSet<usize>, Error>>()?;
+            if num_people_set.len() > 1 {
                 return Err(Error::Generic("inconsistent number of people across the bed files".to_string()));
             }
-            if num_people[0] == 0 {
+            let num_people = num_people_set.into_iter().map(|x| x).collect::<Vec<usize>>()[0];
+            if num_people == 0 {
                 return Err(Error::Generic("cannot create PlinkBed with 0 people".to_string()));
             }
-            num_people[0]
+            num_people
         };
 
         println!("----------");
@@ -800,25 +802,42 @@ mod tests {
 
     use analytic::set::ordered_integer_set::OrderedIntegerSet;
     use analytic::traits::ToIterator;
-    use ndarray::{array, Array, Ix2, s};
+    use ndarray::{array, Array, Axis, Ix2, s, stack};
     use ndarray_rand::RandomExt;
     use rand::distributions::Uniform;
     use tempfile::NamedTempFile;
 
-    use super::PlinkBed;
     use crate::plink_bed::PlinkSnps;
 
+    use super::PlinkBed;
+
     fn create_dummy_bim_fam(
-        bim: &mut NamedTempFile,
-        fam: &mut NamedTempFile,
+        mut bim: &mut NamedTempFile,
+        mut fam: &mut NamedTempFile,
         num_people: usize,
         num_snps: usize,
     ) -> Result<(), io::Error> {
-        for i in 1..=num_people {
-            fam.write_fmt(format_args!("{}\n", i))?;
-        }
+        write_dummy_bim(&mut bim, num_snps)?;
+        write_dummy_fam(&mut fam, num_people)?;
+        Ok(())
+    }
+
+    fn write_dummy_bim(
+        bim: &mut NamedTempFile,
+        num_snps: usize,
+    ) -> Result<(), io::Error> {
         for i in 1..=num_snps {
             bim.write_fmt(format_args!("{}\n", i))?;
+        }
+        Ok(())
+    }
+
+    fn write_dummy_fam(
+        fam: &mut NamedTempFile,
+        num_people: usize,
+    ) -> Result<(), io::Error> {
+        for i in 1..=num_people {
+            fam.write_fmt(format_args!("{}\n", i))?;
         }
         Ok(())
     }
@@ -895,6 +914,43 @@ mod tests {
             [1, 2, 0, 1, 2, 1, 1, 0],
             [2, 0, 1, 0, 1, 0, 0, 2],
         ]);
+    }
+
+    #[test]
+    fn test_multiple_bfiles() {
+        let (num_people, num_snps_1, num_snps_2) = (137usize, 71usize, 37usize);
+        let geno_1 = Array::random((num_people, num_snps_1), Uniform::from(0..3));
+        let geno_2 = Array::random((num_people, num_snps_2), Uniform::from(0..3));
+        let mut bim_1 = NamedTempFile::new().unwrap();
+        let mut bim_2 = NamedTempFile::new().unwrap();
+        let mut fam = NamedTempFile::new().unwrap();
+        write_dummy_fam(&mut fam, num_people).unwrap();
+        write_dummy_bim(&mut bim_1, num_snps_1).unwrap();
+        write_dummy_bim(&mut bim_2, num_snps_2).unwrap();
+        let bed_path_1 = NamedTempFile::new().unwrap().into_temp_path();
+        let bed_path_2 = NamedTempFile::new().unwrap().into_temp_path();
+        let bim_path_1 = bim_1.into_temp_path();
+        let bim_path_2 = bim_2.into_temp_path();
+        let fam_path = fam.into_temp_path();
+        PlinkBed::create_bed(&geno_1, bed_path_1.to_str().unwrap()).unwrap();
+        PlinkBed::create_bed(&geno_2, bed_path_2.to_str().unwrap()).unwrap();
+
+        let bed = PlinkBed::new(
+            &vec![
+                (
+                    bed_path_1.to_str().unwrap().to_string(),
+                    bim_path_1.to_str().unwrap().to_string(),
+                    fam_path.to_str().unwrap().to_string()
+                ),
+                (
+                    bed_path_2.to_str().unwrap().to_string(),
+                    bim_path_2.to_str().unwrap().to_string(),
+                    fam_path.to_str().unwrap().to_string()
+                ),
+            ]
+        ).unwrap();
+        let true_geno_arr = stack![Axis(1), geno_1, geno_2].mapv(|x| x as f32);
+        assert_eq!(true_geno_arr, bed.get_genotype_matrix(None).unwrap());
     }
 
     #[test]
