@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::fs::{File, OpenOptions};
-use std::io::{BufRead, BufReader, Lines, Read, Seek, SeekFrom};
+use std::io::{BufRead, BufReader};
 use std::iter::FromIterator;
 use std::slice::Iter;
 
@@ -15,45 +15,75 @@ pub const COORDINATE_FIELD_INDEX: usize = 3;
 pub const FIRST_ALLELE_FIELD_INDEX: usize = 4;
 pub const SECOND_ALLELE_FIELD_INDEX: usize = 5;
 
-pub type PartitionKeyType = String;
+pub type PartitionKey = String;
 
 pub struct PlinkBim {
-    filepath: String,
-    buf: BufReader<File>,
+    bim_path_list: Vec<String>,
     // maps partition_id to the file line indices
     fileline_partitions: Option<FilelinePartitions>,
 }
 
 impl PlinkBim {
-    pub fn new(filepath: &str) -> Result<PlinkBim, Error> {
-        let buf = BufReader::new(OpenOptions::new().read(true).open(filepath)?);
+    pub fn new(bim_path_list: Vec<String>) -> Result<PlinkBim, Error> {
         Ok(PlinkBim {
-            filepath: filepath.to_string(),
-            buf,
+            bim_path_list,
             fileline_partitions: None,
         })
     }
 
-    pub fn new_with_partitions(filepath: &str, partitions: HashMap<String, OrderedIntegerSet<usize>>) -> Result<PlinkBim, Error> {
-        let mut bim = PlinkBim::new(filepath)?;
+    pub fn new_with_partitions(
+        bim_path_list: Vec<String>,
+        partitions: HashMap<PartitionKey, OrderedIntegerSet<usize>>,
+    ) -> Result<PlinkBim, Error> {
+        let mut bim = PlinkBim::new(bim_path_list)?;
         bim.set_fileline_partitions(Some(FilelinePartitions::new(partitions)));
         Ok(bim)
     }
 
-    pub fn new_with_partition_file(bim_filepath: &str, partition_filepath: &str) -> Result<PlinkBim, Error> {
-        let bim = PlinkBim::new(bim_filepath)?;
+    pub fn new_with_partition_file(
+        bim_path_list: Vec<String>,
+        partition_filepath: &str,
+    ) -> Result<PlinkBim, Error> {
+        let bim = PlinkBim::new(bim_path_list)?;
         bim.into_partitioned_by_file(partition_filepath)
     }
 
-    fn get_id_and_partition_from_partition_fileline_iter<'a, T: Iterator<Item=&'a str>>(iter: &'a mut T) -> Option<(String, String)> {
-        let id = match iter.next() {
-            None => return None,
-            Some(id) => id.to_string(),
-        };
-        match iter.next() {
-            None => None,
-            Some(partition) => Some((id, partition.to_string()))
-        }
+    fn get_buf_list(&self) -> Result<Vec<BufReader<File>>, Error> {
+        self.bim_path_list
+            .iter()
+            .map(|p| Ok(BufReader::new(OpenOptions::new().read(true).open(p)?)))
+            .collect::<Result<Vec<BufReader<File>>, Error>>()
+    }
+
+    pub fn into_partitioned_by_file(mut self, partition_file: &str) -> Result<PlinkBim, Error> {
+        let partitions = self.get_fileline_partitions_from_partition_file(partition_file)?;
+        self.set_fileline_partitions(Some(partitions));
+        Ok(self)
+    }
+
+    pub fn into_partitioned_by_chrom(mut self) -> Result<PlinkBim, Error> {
+        let partitions = self.get_chrom_to_fileline_positions()?;
+        self.set_fileline_partitions(Some(FilelinePartitions::new(partitions)));
+        Ok(self)
+    }
+
+    #[inline]
+    pub fn set_fileline_partitions(&mut self, partitions: Option<FilelinePartitions>) {
+        self.fileline_partitions = partitions;
+    }
+
+    pub fn get_chrom_to_fileline_positions(
+        &mut self
+    ) -> Result<HashMap<PartitionKey, OrderedIntegerSet<usize>>, Error> {
+        Ok(
+            self.get_all_chroms()?
+                .into_iter()
+                .map(|chrom| {
+                    let partition = self.get_chrom_fileline_positions(&chrom)?;
+                    Ok((chrom, partition))
+                })
+                .collect::<Result<HashMap<PartitionKey, OrderedIntegerSet<usize>>, Error>>()?
+        )
     }
 
     pub fn get_fileline_partitions(&self) -> Option<FilelinePartitions> {
@@ -70,10 +100,11 @@ impl PlinkBim {
         }
     }
 
-    pub fn get_fileline_partitions_or(&self,
-                                      default_partition_name: &str,
-                                      default_partition_range: OrderedIntegerSet<usize>)
-        -> FilelinePartitions {
+    pub fn get_fileline_partitions_or(
+        &self,
+        default_partition_name: &str,
+        default_partition_range: OrderedIntegerSet<usize>,
+    ) -> FilelinePartitions {
         match &self.fileline_partitions {
             None => FilelinePartitions::new(
                 HashMap::from_iter(vec![
@@ -86,110 +117,143 @@ impl PlinkBim {
 
     /// each line in the partition file has two fields separated by space:
     /// variant_id assigned_partition
-    pub fn get_fileline_partitions_from_partition_file(&mut self, partition_file_path: &str)
-        -> Result<FilelinePartitions, Error> {
-        let mut id_to_partition: HashMap<String, PartitionKeyType> = HashMap::new();
-        for line in BufReader::new(OpenOptions::new().read(true).open(partition_file_path)?).lines() {
-            match PlinkBim::get_id_and_partition_from_partition_fileline_iter(&mut line?.split_whitespace()) {
-                None => return Err(Error::BadFormat(String::from(
-                    "each line in the partition file should have two fields: id partition_assignment"))),
-                Some((id, partition)) => id_to_partition.insert(id.to_string(), partition.to_string())
-            };
-        }
+    pub fn get_fileline_partitions_from_partition_file(
+        &mut self,
+        partition_file_path: &str,
+    ) -> Result<FilelinePartitions, Error> {
+        let id_to_partition_key: HashMap<String, PartitionKey> =
+            BufReader::new(OpenOptions::new().read(true).open(partition_file_path)?)
+                .lines()
+                .map(|line| PlinkBim::get_id_and_partition_from_line(&line?))
+                .collect::<Result<HashMap<String, PartitionKey>, Error>>()?;
+
+        let mut partitions: HashMap<PartitionKey, OrderedIntegerSet<usize>> = HashMap::new();
         let mut visited_ids = HashSet::new();
-        self.reset_buf()?;
-        let mut partitions: HashMap<PartitionKeyType, OrderedIntegerSet<usize>> = HashMap::new();
-        for (i, line) in self.buf.by_ref().lines().enumerate() {
-            let id = match line?.split_whitespace().nth(VARIANT_ID_FIELD_INDEX) {
-                None => return Err(Error::BadFormat(format!(
-                    "failed to read the variant id in line {} in bim file: {}", i + 1, self.filepath))),
-                Some(id) => id.to_string()
-            };
-            visited_ids.insert(id.to_string());
-            match id_to_partition.get(&id) {
-                None => {}
-                Some(p) => partitions.entry(p.to_owned()).or_insert(OrderedIntegerSet::new()).collect(i)
+        let mut num_ignored_ids = 0;
+
+        let mut file_line_offset = 0;
+        for (b, buf) in self.get_buf_list()?.into_iter().enumerate() {
+            let mut last_line_index = 0;
+            for (i, line) in buf.lines().enumerate() {
+                last_line_index = i;
+                let id = match line?.split_whitespace().nth(VARIANT_ID_FIELD_INDEX) {
+                    None => return Err(Error::BadFormat(format!(
+                        "failed to read the variant id in line {} in bim file: {}",
+                        i + 1,
+                        self.bim_path_list[b]
+                    ))),
+                    Some(id) => id.to_string()
+                };
+                visited_ids.insert(id.to_string());
+                match id_to_partition_key.get(&id) {
+                    None => { if !visited_ids.contains(&id) { num_ignored_ids += 1; } }
+                    Some(key) => {
+                        partitions.entry(key.to_owned())
+                                  .or_insert(OrderedIntegerSet::new())
+                                  .collect(file_line_offset + i)
+                    }
+                }
             }
+            file_line_offset += last_line_index + 1;
         }
-        let num_ids_not_in_bim = id_to_partition.keys().filter(|&k| !visited_ids.contains(k)).count();
+
+        if num_ignored_ids > 0 {
+            println!("PlinkBim: num_ignored_ids: {}", num_ignored_ids);
+        }
+        let num_ids_not_in_bim = id_to_partition_key.keys().filter(|&k| !visited_ids.contains(k)).count();
         if num_ids_not_in_bim > 0 {
-            Err(Error::Generic(format!("{} ID(s) from the partition file {} are not in the bim file {}",
-                                       num_ids_not_in_bim, partition_file_path, self.filepath)))
+            Err(Error::Generic(format!(
+                "{} ID(s) from the partition file {} are not in the bim files {:?}",
+                num_ids_not_in_bim, partition_file_path, self.bim_path_list
+            )))
         } else {
             Ok(FilelinePartitions::new(partitions))
         }
     }
 
-    #[inline]
-    pub fn get_filepath(&self) -> &str {
-        &self.filepath
+    fn get_id_and_partition_from_line(
+        line: &str
+    ) -> Result<(String, PartitionKey), Error> {
+        let mut iter = line.split_whitespace();
+        let id = match iter.next() {
+            None => return Err(Error::BadFormat(String::from(
+                "each line in the partition file should have two fields: id partition_assignment"
+            ))),
+            Some(id) => id.to_string(),
+        };
+        match iter.next() {
+            None => Err(Error::BadFormat(String::from(
+                "each line in the partition file should have two fields: id partition_assignment"
+            ))),
+            Some(partition) => Ok((id, partition.to_string()))
+        }
     }
 
     #[inline]
-    pub fn reset_buf(&mut self) -> Result<(), Error> {
-        self.buf.seek(SeekFrom::Start(0))?;
-        Ok(())
-    }
-
-    pub fn lines(&mut self) -> Lines<&mut BufReader<File>> {
-        self.buf.by_ref().lines()
+    pub fn get_bim_path_list(&self) -> &Vec<String> {
+        &self.bim_path_list
     }
 
     pub fn get_all_chroms(&mut self) -> Result<HashSet<String>, Error> {
-        self.reset_buf()?;
-        return Ok(self.buf.by_ref().lines().filter_map(|l|
-            l.unwrap().split_whitespace().nth(CHROM_FIELD_INDEX).and_then(|s| Some(s.to_string()))
-        ).collect());
+        Ok(self.get_buf_list()?
+            .into_iter()
+            .enumerate()
+            .map(|(b, buf)|
+                buf.lines()
+                   .enumerate()
+                   .map(|(i, l)|
+                       Ok(l?.split_whitespace()
+                            .nth(CHROM_FIELD_INDEX)
+                            .ok_or(Error::Generic(format!(
+                                "failed to extract chromosome id from line {} in file {}",
+                                i + 1, self.bim_path_list[b]
+                            )))?
+                           .to_string()
+                       )
+                   )
+                   .collect::<Result<HashSet<String>, Error>>()
+            )
+            .collect::<Result<Vec<HashSet<String>>, Error>>()?
+            .into_iter()
+            .flat_map(|s| s)
+            .collect()
+        )
     }
 
-    pub fn get_chrom_fileline_positions(&mut self, chrom: &str) -> Result<OrderedIntegerSet<usize>, Error> {
+    pub fn get_chrom_fileline_positions(
+        &mut self,
+        chrom: &str,
+    ) -> Result<OrderedIntegerSet<usize>, Error> {
         let mut set = OrderedIntegerSet::new();
-        self.reset_buf()?;
-        for (i, l) in self.buf.by_ref().lines().enumerate() {
-            if l.unwrap()
-                .split_whitespace()
-                .nth(CHROM_FIELD_INDEX).unwrap() == chrom {
-                set.collect(i);
+        let mut file_line_offfset = 0;
+        for (b, buf) in self.get_buf_list()?.into_iter().enumerate() {
+            let mut last_line_index = 0;
+            for (i, line) in buf.lines().enumerate() {
+                last_line_index = i;
+                if line?
+                    .split_whitespace()
+                    .nth(CHROM_FIELD_INDEX)
+                    .ok_or(Error::Generic(format!(
+                        "failed to extract chromosome id from line {} in file {}",
+                        i + 1, self.bim_path_list[b]
+                    )))? == chrom {
+                    set.collect(file_line_offfset + i);
+                }
             }
+            file_line_offfset += last_line_index + 1;
         }
         Ok(set)
-    }
-
-    pub fn get_chrom_to_fileline_positions(&mut self) -> Result<HashMap<String, OrderedIntegerSet<usize>>, Error> {
-        let mut chrom_to_positions = HashMap::new();
-        for chrom in self.get_all_chroms()? {
-            let positions = self.get_chrom_fileline_positions(&chrom)?;
-            chrom_to_positions.insert(chrom, positions);
-        }
-        Ok(chrom_to_positions)
-    }
-
-    #[inline]
-    pub fn set_fileline_partitions(&mut self, partitions: Option<FilelinePartitions>) {
-        self.fileline_partitions = partitions;
-    }
-
-    pub fn into_partitioned_by_chrom(mut self) -> Result<PlinkBim, Error> {
-        let partitions = self.get_chrom_to_fileline_positions()?;
-        self.set_fileline_partitions(Some(FilelinePartitions::new(partitions)));
-        Ok(self)
-    }
-
-    pub fn into_partitioned_by_file(mut self, partition_file: &str) -> Result<PlinkBim, Error> {
-        let partitions = self.get_fileline_partitions_from_partition_file(partition_file)?;
-        self.set_fileline_partitions(Some(partitions));
-        Ok(self)
     }
 }
 
 #[derive(Clone, Debug)]
 pub struct FilelinePartitions {
-    partitions: HashMap<String, OrderedIntegerSet<usize>>,
+    partitions: HashMap<PartitionKey, OrderedIntegerSet<usize>>,
     ordered_partition_keys: Vec<String>,
 }
 
 impl FilelinePartitions {
-    pub fn new(partitions: HashMap<String, OrderedIntegerSet<usize>>) -> FilelinePartitions {
+    pub fn new(partitions: HashMap<PartitionKey, OrderedIntegerSet<usize>>) -> FilelinePartitions {
         let ordered_partition_keys = FilelinePartitions::get_ordered_keys(&partitions);
         FilelinePartitions {
             partitions,
@@ -197,8 +261,8 @@ impl FilelinePartitions {
         }
     }
 
-    fn get_ordered_keys(partitions: &HashMap<String, OrderedIntegerSet<usize>>) -> Vec<String> {
-        let mut keys: Vec<String> = partitions.keys().map(|s| s.to_string()).collect();
+    fn get_ordered_keys(partitions: &HashMap<PartitionKey, OrderedIntegerSet<usize>>) -> Vec<PartitionKey> {
+        let mut keys: Vec<PartitionKey> = partitions.keys().map(|s| s.to_string()).collect();
         if keys.iter().filter(|&k| k.parse::<i32>().is_err()).count() > 0 {
             keys.sort();
         } else {
@@ -208,17 +272,17 @@ impl FilelinePartitions {
     }
 
     #[inline]
-    pub fn ordered_partition_keys(&self) -> &Vec<String> {
+    pub fn ordered_partition_keys(&self) -> &Vec<PartitionKey> {
         &self.ordered_partition_keys
     }
 
     #[inline]
-    pub fn to_hash_map(&self) -> HashMap<String, OrderedIntegerSet<usize>> {
+    pub fn to_hash_map(&self) -> HashMap<PartitionKey, OrderedIntegerSet<usize>> {
         self.partitions.clone()
     }
 
     #[inline]
-    pub fn into_hash_map(self) -> HashMap<String, OrderedIntegerSet<usize>> {
+    pub fn into_hash_map(self) -> HashMap<PartitionKey, OrderedIntegerSet<usize>> {
         self.partitions
     }
 
@@ -252,7 +316,7 @@ mod tests {
     use std::io::{BufWriter, Write};
 
     use analytic::set::ordered_integer_set::{ContiguousIntegerSet, OrderedIntegerSet};
-    use tempfile::{NamedTempFile, TempPath};
+    use tempfile::NamedTempFile;
 
     use super::PlinkBim;
 
@@ -264,9 +328,9 @@ mod tests {
 
     #[test]
     fn test_get_chrom_to_positions() {
-        let file = NamedTempFile::new().unwrap();
+        let bim_file_1 = NamedTempFile::new().unwrap();
         {
-            let mut writer = BufWriter::new(&file);
+            let mut writer = BufWriter::new(&bim_file_1);
             for (chrom, coord, id) in &[
                 (1, 2, "chr1:2"), (1, 3, "chr1:3"), (1, 4, "chr1:4"), (1, 7, "chr1:7"), (1, 8, "chr1:8"), (1, 20, "chr1:20"),
                 (3, 4, "chr3:4"), (3, 5, "chr3:5"), (3, 6, "chr3:6"), (3, 10, "chr3:10"),
@@ -278,10 +342,29 @@ mod tests {
                 write_bim_line(&mut writer, &chrom.to_string(), id, *coord, 'A', 'C');
             }
         }
-        let mut bim = PlinkBim::new(file.into_temp_path().to_str().unwrap()).unwrap();
+        let bim_file_2 = NamedTempFile::new().unwrap();
+        {
+            let mut writer = BufWriter::new(&bim_file_2);
+            for (chrom, coord, id) in &[
+                (1, 0, "chr1:0"), (1, 200, "chr1:200"),
+                (5, 1000, "chr5:1000"),
+                (12, 100, "chr12:100"),
+            ] {
+                write_bim_line(&mut writer, &chrom.to_string(), id, *coord, 'A', 'C');
+            }
+        }
+        let bim_temp_path_1 = bim_file_1.into_temp_path();
+        let bim_temp_path_2 = bim_file_2.into_temp_path();
+        let mut bim = PlinkBim::new(vec![
+            bim_temp_path_1.to_str().unwrap().to_string(),
+            bim_temp_path_2.to_str().unwrap().to_string()
+        ]).unwrap();
         let positions = bim.get_chrom_to_fileline_positions().unwrap();
         let expected: HashMap<String, OrderedIntegerSet<usize>> = vec![
-            ("1".to_string(), OrderedIntegerSet::from(vec![ContiguousIntegerSet::new(0, 5)])),
+            ("1".to_string(), OrderedIntegerSet::from(vec![
+                ContiguousIntegerSet::new(0, 5),
+                ContiguousIntegerSet::new(18, 19),
+            ])),
             ("3".to_string(), OrderedIntegerSet::from(vec![
                 ContiguousIntegerSet::new(6, 9),
                 ContiguousIntegerSet::new(13, 15)
@@ -290,7 +373,9 @@ mod tests {
             ("5".to_string(), OrderedIntegerSet::from(vec![
                 ContiguousIntegerSet::new(11, 12),
                 ContiguousIntegerSet::new(16, 17),
-            ]))
+                ContiguousIntegerSet::new(20, 20),
+            ])),
+            ("12".to_string(), OrderedIntegerSet::from(vec![ContiguousIntegerSet::new(21, 21)])),
         ].into_iter().collect();
         assert_eq!(positions, expected);
     }
@@ -304,16 +389,17 @@ mod tests {
                 write_bim_line(&mut writer, &chrom.to_string(), "id", 0, 'A', 'C');
             }
         }
-        let mut bim = PlinkBim::new(file.into_temp_path().to_str().unwrap()).unwrap();
+        let bim_temp_path = file.into_temp_path();
+        let mut bim = PlinkBim::new(vec![bim_temp_path.to_str().unwrap().to_string()]).unwrap();
         let chrom_set = bim.get_all_chroms().unwrap();
         let expected: HashSet<String> = vec!["1", "2", "3", "5"].into_iter().map(|x| x.to_string()).collect();
         assert_eq!(chrom_set, expected);
     }
 
-    fn create_dummy_bim() -> (TempPath, PlinkBim) {
-        let file = NamedTempFile::new().unwrap();
+    fn create_dummy_bim() -> (NamedTempFile, NamedTempFile) {
+        let bim_temp_file = NamedTempFile::new().unwrap();
         {
-            let mut writer = BufWriter::new(&file);
+            let mut writer = BufWriter::new(&bim_temp_file);
             for (chrom, coord, id) in &[
                 (1, 2, "chr1:2"), (1, 3, "chr1:3"), (1, 4, "chr1:4"), (1, 7, "chr1:7"), (1, 8, "chr1:8"), (1, 20, "chr1:20"),
                 (3, 4, "chr3:4"), (3, 5, "chr3:5"), (3, 6, "chr3:6"), (3, 10, "chr3:10"),
@@ -325,7 +411,6 @@ mod tests {
                 write_bim_line(&mut writer, &chrom.to_string(), id, *coord, 'A', 'C');
             }
         }
-        let bim = PlinkBim::new(file.into_temp_path().to_str().unwrap()).unwrap();
 
         let partition_file = NamedTempFile::new().unwrap();
         {
@@ -342,12 +427,16 @@ mod tests {
                 writer.write_fmt(format_args!("{} {}\n", id, partition)).unwrap();
             }
         }
-        (partition_file.into_temp_path(), bim)
+        (partition_file, bim_temp_file)
     }
 
     #[test]
     fn test_get_fileline_partitions() {
-        let (partition_file_path, mut bim) = create_dummy_bim();
+        let (partition_file, bim_temp_file) = create_dummy_bim();
+        let bim_temp_path = bim_temp_file.into_temp_path();
+        let mut bim = PlinkBim::new(vec![bim_temp_path.to_str().unwrap().to_string()]).unwrap();
+
+        let partition_file_path = partition_file.into_temp_path();
         let partitions = bim.get_fileline_partitions_from_partition_file(partition_file_path.to_str().unwrap())
                             .unwrap().partitions;
         assert_eq!(partitions.get("p1").unwrap(), &OrderedIntegerSet::from_slice(&[[1, 2], [5, 5], [10, 10], [12, 15]]));
@@ -368,7 +457,11 @@ mod tests {
 
     #[test]
     fn test_fileline_partitions_iter() {
-        let (partition_file_path, mut bim) = create_dummy_bim();
+        let (partition_file, bim_temp_file) = create_dummy_bim();
+        let bim_temp_path = bim_temp_file.into_temp_path();
+        let mut bim = PlinkBim::new(vec![bim_temp_path.to_str().unwrap().to_string()]).unwrap();
+
+        let partition_file_path = partition_file.into_temp_path();
         let partitions = bim.get_fileline_partitions_from_partition_file(partition_file_path.to_str().unwrap())
                             .unwrap();
         let mut iter = partitions.iter();
