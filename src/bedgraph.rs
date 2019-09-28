@@ -78,9 +78,8 @@ impl<D: Float + FromStr<Err=E>, E: fmt::Debug> Iterator for BedGraphDataLineIter
     type Item = BedGraphDataLine<D>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let mut line = String::new();
         loop {
-            line.clear();
+            let mut line = String::new();
             if self.buf.read_line(&mut line).unwrap() == 0 {
                 return None;
             } else {
