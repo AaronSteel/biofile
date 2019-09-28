@@ -4,19 +4,19 @@ use std::io::{BufRead, BufReader};
 use crate::error::Error;
 use crate::util::get_buf;
 
-pub struct PeakFormat {
+pub struct PeakFile {
     filepath: String
 }
 
-impl PeakFormat {
-    pub fn new(filepath: String) -> PeakFormat {
-        PeakFormat {
+impl PeakFile {
+    pub fn new(filepath: String) -> PeakFile {
+        PeakFile {
             filepath
         }
     }
 
-    pub fn iter(&self) -> Result<PeakFormatIter, Error> {
-        Ok(PeakFormatIter::new(get_buf(&self.filepath)?))
+    pub fn iter(&self) -> Result<PeakFileIter, Error> {
+        Ok(PeakFileIter::new(get_buf(&self.filepath)?))
     }
 
     pub fn get_filepath(&self) -> &str {
@@ -43,7 +43,7 @@ pub struct Bed6Line {
 }
 
 #[derive(PartialEq, Clone, Debug)]
-pub struct PeakFormatDataLine {
+pub struct PeakFileDataLine {
     pub bed_6: Bed6Line,
     pub signal_value: f64,
     pub p_value: f64,
@@ -51,20 +51,20 @@ pub struct PeakFormatDataLine {
     pub peak: Option<usize>,
 }
 
-pub struct PeakFormatIter {
+pub struct PeakFileIter {
     buf: BufReader<File>
 }
 
-impl PeakFormatIter {
-    pub fn new(buf: BufReader<File>) -> PeakFormatIter {
-        PeakFormatIter {
+impl PeakFileIter {
+    pub fn new(buf: BufReader<File>) -> PeakFileIter {
+        PeakFileIter {
             buf
         }
     }
 }
 
-impl Iterator for PeakFormatIter {
-    type Item = PeakFormatDataLine;
+impl Iterator for PeakFileIter {
+    type Item = PeakFileDataLine;
     fn next(&mut self) -> Option<Self::Item> {
         loop {
             let mut line = String::new();
@@ -98,7 +98,7 @@ impl Iterator for PeakFormatIter {
                     Some(p) => Some(p.parse::<usize>().unwrap()),
                     None => None,
                 };
-                return Some(PeakFormatDataLine {
+                return Some(PeakFileDataLine {
                     bed_6: Bed6Line {
                         chrom,
                         start,
@@ -123,7 +123,7 @@ mod tests {
 
     use tempfile::NamedTempFile;
 
-    use crate::peak_format::{Bed6Line, PeakFormat, PeakFormatDataLine};
+    use crate::peak_file::{Bed6Line, PeakFile, PeakFileDataLine};
 
     #[test]
     fn test_get_chrom_to_interval_to_val() {
@@ -139,10 +139,10 @@ mod tests {
                 )
             ).unwrap();
         }
-        let peak_format = PeakFormat::new(file.path().to_str().unwrap().to_string());
-        let mut iter = peak_format.iter().unwrap();
+        let peak_file = PeakFile::new(file.path().to_str().unwrap().to_string());
+        let mut iter = peak_file.iter().unwrap();
         assert_eq!(
-            Some(PeakFormatDataLine {
+            Some(PeakFileDataLine {
                 bed_6: Bed6Line {
                     chrom: "chr1".to_string(),
                     start: 10050,
@@ -160,7 +160,7 @@ mod tests {
         );
 
         assert_eq!(
-            Some(PeakFormatDataLine {
+            Some(PeakFileDataLine {
                 bed_6: Bed6Line {
                     chrom: "chr1".to_string(),
                     start: 28650,
@@ -178,7 +178,7 @@ mod tests {
         );
 
         assert_eq!(
-            Some(PeakFormatDataLine {
+            Some(PeakFileDataLine {
                 bed_6: Bed6Line {
                     chrom: "chr1".to_string(),
                     start: 29000,
