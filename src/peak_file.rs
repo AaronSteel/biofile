@@ -23,7 +23,7 @@ impl PeakFile {
         Ok(PeakFileIter::new(get_buf(&self.filepath)?))
     }
 
-    pub fn get_chrom_to_peaks(&self)
+    pub fn get_chrom_to_peak_locations(&self)
         -> Result<HashMap<String, OrderedIntervalPartitions<usize>>, Error> {
         let mut chrom_to_intervals = HashMap::new();
         for line in self.iter()? {
@@ -139,13 +139,14 @@ impl Iterator for PeakFileIter {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
     use std::io::{BufWriter, Write};
 
-    use tempfile::NamedTempFile;
-    use std::collections::HashMap;
-    use crate::peak_file::{PeakFile, PeakFileDataLine};
     use analytic::partition::ordered_interval_partitions::OrderedIntervalPartitions;
     use analytic::set::ordered_integer_set::ContiguousIntegerSet;
+    use tempfile::NamedTempFile;
+
+    use crate::peak_file::{PeakFile, PeakFileDataLine};
 
     #[test]
     fn test_get_chrom_to_interval_to_val() {
@@ -271,6 +272,6 @@ mod tests {
         ].into_iter()
          .map(|(c, p)| (c.to_string(), p))
          .collect();
-        assert_eq!(expected, peak_file.get_chrom_to_peaks().unwrap());
+        assert_eq!(expected, peak_file.get_chrom_to_peak_locations().unwrap());
     }
 }
