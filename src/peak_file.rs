@@ -23,8 +23,11 @@ impl PeakFile {
         Ok(PeakFileIter::new(get_buf(&self.filepath)?))
     }
 
-    pub fn get_chrom_to_peak_locations(&self, min_score: Option<f64>)
-        -> Result<HashMap<String, OrderedIntervalPartitions<usize>>, Error> {
+    pub fn get_chrom_to_peak_locations(
+        &self,
+        min_score: Option<f64>,
+        min_length: Option<usize>,
+    ) -> Result<HashMap<String, OrderedIntervalPartitions<usize>>, Error> {
         let mut chrom_to_intervals = HashMap::new();
         for line in self.iter()? {
             let chrom = line.chrom;
@@ -33,6 +36,11 @@ impl PeakFile {
             if end > start {
                 if let Some(min_score) = min_score {
                     if line.score < min_score {
+                        continue;
+                    }
+                }
+                if let Some(min_length) = min_length {
+                    if end - start < min_length {
                         continue;
                     }
                 }
