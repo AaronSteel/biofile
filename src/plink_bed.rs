@@ -12,6 +12,8 @@ use ndarray::{Array, Ix2, ShapeBuilder};
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 use rayon::iter::plumbing::{bridge, Consumer, Producer, ProducerCallback, UnindexedConsumer};
 
+use plink_snps::PlinkSnps;
+
 use crate::byte_chunk_iter::ByteChunkIter;
 use crate::error::Error;
 use crate::util::get_buf;
@@ -19,6 +21,8 @@ use crate::util::get_buf;
 pub const MAGIC_BYTES: [u8; 3] = [0x6c_u8, 0x1b_u8, 0x01_u8];
 pub const NUM_MAGIC_BYTES: usize = 3;
 const NUM_PEOPLE_PER_BYTE: usize = 4;
+
+pub mod plink_snps;
 
 pub struct PlinkBed {
     bed_path_list: Vec<String>,
@@ -200,7 +204,7 @@ impl PlinkBed {
                 let mut buf_writer = BufWriter::new(
                     OpenOptions::new().create(true).truncate(true).write(true).open(out_path)?
                 );
-                let num_bytes_per_person = PlinkBed::usize_div_ceil(total_num_snps, 4);
+                let num_bytes_per_person = usize_div_ceil(total_num_snps, 4);
 
                 let people_stride = snp_byte_chunk_size * 4;
                 let mut snp_bytes = vec![0u8; snp_byte_chunk_size];
@@ -210,7 +214,7 @@ impl PlinkBed {
                     let mut people_buf = vec![vec![0u8; num_bytes_per_person]; people_stride];
                     if self.num_people - j < people_stride {
                         let remaining_people = self.num_people % people_stride;
-                        snp_bytes = vec![0u8; PlinkBed::usize_div_ceil(remaining_people, 4)];
+                        snp_bytes = vec![0u8; usize_div_ceil(remaining_people, 4)];
                     }
                     let relative_seek_offset = (num_bytes_per_snp - snp_bytes.len()) as i64;
                     // read 4 SNPs to the buffers at a time
@@ -280,10 +284,10 @@ impl PlinkBed {
             let mut i = 0;
             for _ in 0..num_people / 4 {
                 buf_writer.write(&[
-                    PlinkBed::geno_to_lowest_two_bits(col[i])
-                        | (PlinkBed::geno_to_lowest_two_bits(col[i + 1]) << 2)
-                        | (PlinkBed::geno_to_lowest_two_bits(col[i + 2]) << 4)
-                        | (PlinkBed::geno_to_lowest_two_bits(col[i + 3]) << 6)
+                    geno_to_lowest_two_bits(col[i])
+                        | (geno_to_lowest_two_bits(col[i + 1]) << 2)
+                        | (geno_to_lowest_two_bits(col[i + 2]) << 4)
+                        | (geno_to_lowest_two_bits(col[i + 3]) << 6)
                 ])?;
                 i += 4;
             }
@@ -291,32 +295,12 @@ impl PlinkBed {
             if remainder > 0 {
                 let mut byte = 0u8;
                 for j in 0..remainder {
-                    byte |= PlinkBed::geno_to_lowest_two_bits(col[i + j]) << (j * 2);
+                    byte |= geno_to_lowest_two_bits(col[i + j]) << (j * 2);
                 }
                 buf_writer.write(&[byte])?;
             }
         }
         Ok(())
-    }
-
-    pub fn geno_to_lowest_two_bits(geno: u8) -> u8 {
-        // 00 -> 2 homozygous for the first allele in the .bim file (usually the minor allele)
-        // 01 -> 0 missing genotype
-        // 10 -> 1 heterozygous
-        // 11 -> 0 homozygous for the second allele in the .bim file (usually the major allele)
-        let not_a = ((geno & 0b10) >> 1) ^ 1;
-        let not_b = (geno & 1) ^ 1;
-        (not_a << 1) | (not_b & not_a)
-    }
-
-    pub fn lowest_two_bits_to_geno(byte: u8) -> u8 {
-        // 00 -> 2 homozygous for the first allele in the .bim file (usually the minor allele)
-        // 01 -> 0 missing genotype
-        // 10 -> 1 heterozygous
-        // 11 -> 0 homozygous for the second allele in the .bim file (usually the major allele)
-        let a = (byte & 0b10) >> 1;
-        let b = byte & 1;
-        (((a | b) ^ 1) << 1) | (a & (!b))
     }
 
     fn verify_magic_bytes(bed_filepath: &str) -> Result<(), Error> {
@@ -354,12 +338,7 @@ impl PlinkBed {
 
     #[inline]
     fn num_bytes_per_snp(num_people: usize) -> usize {
-        PlinkBed::usize_div_ceil(num_people, NUM_PEOPLE_PER_BYTE)
-    }
-
-    #[inline]
-    fn usize_div_ceil(a: usize, divisor: usize) -> usize {
-        a / divisor + (a % divisor != 0) as usize
+        usize_div_ceil(num_people, NUM_PEOPLE_PER_BYTE)
     }
 
     /// makes the BufReader point to the start of the byte containing the SNP i individual j
@@ -378,6 +357,30 @@ impl PlinkBed {
     }
 }
 
+fn usize_div_ceil(a: usize, divisor: usize) -> usize {
+    a / divisor + (a % divisor != 0) as usize
+}
+
+fn lowest_two_bits_to_geno(byte: u8) -> u8 {
+    // 00 -> 2 homozygous for the first allele in the .bim file (usually the minor allele)
+    // 01 -> 0 missing genotype
+    // 10 -> 1 heterozygous
+    // 11 -> 0 homozygous for the second allele in the .bim file (usually the major allele)
+    let a = (byte & 0b10) >> 1;
+    let b = byte & 1;
+    (((a | b) ^ 1) << 1) | (a & (!b))
+}
+
+fn geno_to_lowest_two_bits(geno: u8) -> u8 {
+    // 00 -> 2 homozygous for the first allele in the .bim file (usually the minor allele)
+    // 01 -> 0 missing genotype
+    // 10 -> 1 heterozygous
+    // 11 -> 0 homozygous for the second allele in the .bim file (usually the major allele)
+    let not_a = ((geno & 0b10) >> 1) ^ 1;
+    let not_b = (geno & 1) ^ 1;
+    (not_a << 1) | (not_b & not_a)
+}
+
 fn get_num_people_last_byte(total_num_people: usize) -> Option<usize> {
     if total_num_people == 0 {
         None
@@ -392,108 +395,6 @@ fn get_num_people_last_byte(total_num_people: usize) -> Option<usize> {
 fn get_line_count(filename: &str) -> Result<usize, Error> {
     let fam_buf = get_buf(filename)?;
     Ok(fam_buf.lines().count())
-}
-
-pub struct PlinkSnps {
-    bytes: Vec<u8>,
-    num_snps: usize,
-}
-
-impl PlinkSnps {
-    pub fn new(bytes: Vec<u8>, num_snps: usize) -> PlinkSnps {
-        assert!(num_snps <= bytes.len() * 4,
-                format!("num_snps ({}) > bytes.len() * 4 = {}", num_snps, bytes.len() * 4));
-        PlinkSnps {
-            bytes,
-            num_snps,
-        }
-    }
-
-    pub fn from_geno(geno: Vec<u8>) -> PlinkSnps {
-        let num_bytes = PlinkBed::usize_div_ceil(geno.len(), 4);
-        let mut bytes: Vec<u8> = Vec::with_capacity(num_bytes);
-        let mut snp_index = 0;
-        if let Some(num_people_last_byte) = get_num_people_last_byte(geno.len()) {
-            for _ in 0..num_bytes - 1 {
-                bytes.push(
-                    PlinkBed::geno_to_lowest_two_bits(geno[snp_index])
-                        | (PlinkBed::geno_to_lowest_two_bits(geno[snp_index + 1]) << 2)
-                        | (PlinkBed::geno_to_lowest_two_bits(geno[snp_index + 2]) << 4)
-                        | (PlinkBed::geno_to_lowest_two_bits(geno[snp_index + 3]) << 6)
-                );
-                snp_index += 4;
-            }
-            // last byte
-            let mut last_byte = 0u8;
-            for j in 0..num_people_last_byte {
-                last_byte |= PlinkBed::geno_to_lowest_two_bits(geno[snp_index + j]) << (j * 2);
-            }
-            bytes.push(last_byte);
-        }
-        PlinkSnps::new(bytes, geno.len())
-    }
-
-    #[inline]
-    pub fn get_num_snps(&self) -> usize {
-        self.num_snps
-    }
-
-    #[inline]
-    pub fn to_bytes(&self) -> &Vec<u8> {
-        &self.bytes
-    }
-
-    #[inline]
-    pub fn into_bytes(self) -> Vec<u8> {
-        self.bytes
-    }
-}
-
-impl ToIterator<'_, PlinkSnpsIter, u8> for PlinkSnps {
-    fn to_iter(&self) -> PlinkSnpsIter {
-        PlinkSnpsIter {
-            bytes: self.bytes.clone(),
-            num_snps: self.num_snps,
-            byte_cursor: 0,
-            cursor: 0,
-        }
-    }
-}
-
-impl IntoIterator for PlinkSnps {
-    type Item = <PlinkSnpsIter as Iterator>::Item;
-    type IntoIter = PlinkSnpsIter;
-    fn into_iter(self) -> Self::IntoIter {
-        PlinkSnpsIter {
-            bytes: self.bytes,
-            num_snps: self.num_snps,
-            byte_cursor: 0,
-            cursor: 0,
-        }
-    }
-}
-
-pub struct PlinkSnpsIter {
-    bytes: Vec<u8>,
-    num_snps: usize,
-    byte_cursor: usize,
-    cursor: usize,
-}
-
-impl Iterator for PlinkSnpsIter {
-    type Item = u8;
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.cursor >= self.num_snps {
-            None
-        } else {
-            let snp = PlinkBed::lowest_two_bits_to_geno(self.bytes[self.byte_cursor] >> (2 * (self.cursor % 4) as u8));
-            self.cursor += 1;
-            if self.cursor % 4 == 0 {
-                self.byte_cursor += 1;
-            }
-            Some(snp)
-        }
-    }
 }
 
 struct FileSnpIndexer {
@@ -649,15 +550,15 @@ impl PlinkColChunkIter {
         for index in snp_indices.to_iter() {
             self.read_snp_bytes(index, &mut snp_bytes).unwrap();
             for i in 0..num_bytes_per_snp - 1 {
-                v[acc_i] = PlinkBed::lowest_two_bits_to_geno(snp_bytes[i]) as f32;
-                v[acc_i + 1] = PlinkBed::lowest_two_bits_to_geno(snp_bytes[i] >> 2) as f32;
-                v[acc_i + 2] = PlinkBed::lowest_two_bits_to_geno(snp_bytes[i] >> 4) as f32;
-                v[acc_i + 3] = PlinkBed::lowest_two_bits_to_geno(snp_bytes[i] >> 6) as f32;
+                v[acc_i] = lowest_two_bits_to_geno(snp_bytes[i]) as f32;
+                v[acc_i + 1] = lowest_two_bits_to_geno(snp_bytes[i] >> 2) as f32;
+                v[acc_i + 2] = lowest_two_bits_to_geno(snp_bytes[i] >> 4) as f32;
+                v[acc_i + 3] = lowest_two_bits_to_geno(snp_bytes[i] >> 6) as f32;
                 acc_i += 4;
             }
             // last byte
             for k in 0..num_people_last_byte {
-                v[acc_i] = PlinkBed::lowest_two_bits_to_geno(snp_bytes[num_bytes_per_snp - 1] >> (k << 1)) as f32;
+                v[acc_i] = lowest_two_bits_to_geno(snp_bytes[num_bytes_per_snp - 1] >> (k << 1)) as f32;
                 acc_i += 1;
             }
         }
@@ -689,7 +590,7 @@ impl Iterator for PlinkColChunkIter {
 
 impl ExactSizeIterator for PlinkColChunkIter {
     fn len(&self) -> usize {
-        PlinkBed::usize_div_ceil(self.num_snps_in_range - self.range_cursor, self.num_snps_per_iter)
+        usize_div_ceil(self.num_snps_in_range - self.range_cursor, self.num_snps_per_iter)
     }
 }
 
@@ -806,8 +707,6 @@ mod tests {
     use ndarray_rand::RandomExt;
     use rand::distributions::Uniform;
     use tempfile::NamedTempFile;
-
-    use crate::plink_bed::PlinkSnps;
 
     use super::PlinkBed;
 
@@ -1002,44 +901,6 @@ mod tests {
             jj += 1;
         }
         assert_eq!(arr, geno);
-    }
-
-    #[test]
-    fn test_plink_snps() {
-        let expected_num_snps = 12;
-        let snps = PlinkSnps::new(
-            vec![0b10_00_11_00, 0b00_00_11_11, 0b11_10_10_10, 0b11001100],
-            expected_num_snps,
-        );
-        let expected: Vec<u8> = vec![2, 0, 2, 1, 0, 0, 2, 2, 1, 1, 1, 0];
-        let mut num_snps = 0;
-        for (s, e) in snps.to_iter().zip(expected.iter()) {
-            assert_eq!(s, *e);
-            num_snps += 1;
-        }
-        assert_eq!(num_snps, expected_num_snps);
-    }
-
-    #[test]
-    fn test_plink_snps_from_geno() {
-        fn test(geno: Vec<u8>) {
-            let plink_snps = PlinkSnps::from_geno(geno.clone());
-            let num_snps = geno.len();
-            let mut iter = plink_snps.into_iter();
-            for i in 0..num_snps {
-                assert_eq!(Some(geno[i]), iter.next());
-            }
-            assert_eq!(None, iter.next());
-        }
-        test(vec![]);
-        test(vec![0]);
-        test(vec![1]);
-        test(vec![2]);
-        test(vec![0, 1, 1]);
-        test(vec![2, 2, 0, 1]);
-        test(vec![1, 2, 0, 1, 1, 0]);
-        test(vec![1, 2, 0, 1, 1, 0, 2, 1]);
-        test(vec![1, 2, 2, 0, 0, 1, 0, 0, 2, 0]);
     }
 
     #[test]

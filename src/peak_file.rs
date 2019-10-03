@@ -285,6 +285,6 @@ mod tests {
         ].into_iter()
          .map(|(c, p)| (c.to_string(), p))
          .collect();
-        assert_eq!(expected, peak_file.get_chrom_to_peak_locations(None).unwrap());
+        assert_eq!(expected, peak_file.get_chrom_to_peak_locations(None, None).unwrap());
     }
 }
