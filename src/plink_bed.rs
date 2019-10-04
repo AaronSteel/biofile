@@ -8,7 +8,7 @@ use analytic::set::ordered_integer_set::OrderedIntegerSet;
 use analytic::set::traits::{Finite, Set};
 use analytic::stats::sum_f32;
 use analytic::traits::ToIterator;
-use ndarray::{Array, Ix2, ShapeBuilder};
+use ndarray::{Array, Ix2, ShapeBuilder, Axis};
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 use rayon::iter::plumbing::{bridge, Consumer, Producer, ProducerCallback, UnindexedConsumer};
 
@@ -95,11 +95,13 @@ impl PlinkBed {
         &self,
         num_snps_per_iter: usize,
         range: Option<OrderedIntegerSet<usize>>,
+        snp_type: PlinkSnpType,
     ) -> PlinkColChunkIter {
         match range {
             Some(range) => PlinkColChunkIter::new(
                 self.file_num_snps.clone(),
                 range,
+                snp_type,
                 num_snps_per_iter,
                 self.num_people,
                 self.bed_path_list.clone(),
@@ -108,6 +110,7 @@ impl PlinkBed {
                 PlinkColChunkIter::new(
                     self.file_num_snps.clone(),
                     OrderedIntegerSet::from_slice(&[[0, self.total_num_snps() - 1]]),
+                    snp_type,
                     num_snps_per_iter,
                     self.num_people,
                     self.bed_path_list.clone(),
@@ -145,6 +148,7 @@ impl PlinkBed {
     pub fn get_genotype_matrix(
         &self,
         snps_range: Option<OrderedIntegerSet<usize>>,
+        snp_type: PlinkSnpType,
     ) -> Result<Array<f32, Ix2>, Error> {
         let num_snps = match &snps_range {
             None => self.total_num_snps(),
@@ -152,7 +156,7 @@ impl PlinkBed {
         };
         let mut v = Vec::with_capacity(self.num_people * num_snps);
 
-        for snp_chunk in self.col_chunk_iter(100, snps_range) {
+        for snp_chunk in self.col_chunk_iter(100, snps_range, snp_type) {
             v.append(&mut snp_chunk.t().to_owned().as_slice().unwrap().to_vec());
         }
         let geno_arr = Array::from_shape_vec(
@@ -176,7 +180,7 @@ impl PlinkBed {
 
     pub fn get_minor_allele_frequencies(&self, chunk_size: Option<usize>) -> Vec<f32> {
         let num_alleles = (self.num_people * 2) as f32;
-        self.col_chunk_iter(chunk_size.unwrap_or(50), None)
+        self.col_chunk_iter(chunk_size.unwrap_or(50), None, PlinkSnpType::Additive)
             .into_par_iter()
             .flat_map(|snps| {
                 snps.gencolumns()
@@ -422,10 +426,17 @@ impl FileSnpIndexer {
     }
 }
 
+#[derive(Copy, Clone, PartialEq, Debug)]
+pub enum PlinkSnpType {
+    Additive,
+    Dominance,
+}
+
 pub struct PlinkColChunkIter {
     buf: Vec<BufReader<File>>,
     file_num_snps: Vec<usize>,
     range: OrderedIntegerSet<usize>,
+    snp_type: PlinkSnpType,
     num_snps_per_iter: usize,
     num_people: usize,
     num_snps_in_range: usize,
@@ -439,6 +450,7 @@ impl PlinkColChunkIter {
     pub fn new(
         file_num_snps: Vec<usize>,
         range: OrderedIntegerSet<usize>,
+        snp_type: PlinkSnpType,
         num_snps_per_iter: usize,
         num_people: usize,
         bed_path_list: Vec<String>,
@@ -451,6 +463,7 @@ impl PlinkColChunkIter {
             buf,
             file_num_snps,
             range,
+            snp_type,
             num_snps_per_iter,
             num_people,
             num_snps_in_range,
@@ -497,7 +510,11 @@ impl PlinkColChunkIter {
         }
     }
 
-    fn read_snp_bytes(&mut self, snp_index: usize, mut snp_bytes_buf: &mut Vec<u8>) -> Result<(), Error> {
+    fn read_snp_bytes(
+        &mut self,
+        snp_index: usize,
+        mut snp_bytes_buf: &mut Vec<u8>,
+    ) -> Result<(), Error> {
         let num_bytes_per_snp = PlinkBed::num_bytes_per_snp(self.num_people);
         match self.file_snp_indexer.get_file_snp_index(snp_index) {
             Some((file_index, snp_index_within_file)) => {
@@ -527,6 +544,7 @@ impl PlinkColChunkIter {
         PlinkColChunkIter::new(
             self.file_num_snps.clone(),
             range,
+            self.snp_type,
             self.num_snps_per_iter,
             self.num_people,
             self.bed_path_list.clone(),
@@ -562,9 +580,36 @@ impl PlinkColChunkIter {
                 acc_i += 1;
             }
         }
-        Array::from_shape_vec((self.num_people, chunk_size)
-                                  .strides((1, self.num_people)), v).unwrap()
+        let chunk_arr = Array::from_shape_vec(
+            (self.num_people, chunk_size).strides((1, self.num_people)),
+            v,
+        ).unwrap();
+
+        match self.snp_type {
+            PlinkSnpType::Dominance => {
+                convert_to_dominance_representation(chunk_arr)
+            }
+            PlinkSnpType::Additive => chunk_arr
+        }
     }
+}
+
+fn convert_to_dominance_representation(mut geno_arr: Array<f32, Ix2>) -> Array<f32, Ix2> {
+    let num_people = geno_arr.dim().0;
+    let double_num_people = (2 * num_people) as f32;
+    for mut col in geno_arr.axis_iter_mut(Axis(1)) {
+        let p = sum_f32(col.iter()) / double_num_people;
+        let hetero = 2. * p;
+        let homo_minor = 4. * p - 2.;
+        for i in 0..num_people {
+            col[i] = match col[i] as u8 {
+                2 => homo_minor,
+                1 => hetero,
+                _ => 0.
+            };
+        }
+    }
+    geno_arr
 }
 
 impl IntoParallelIterator for PlinkColChunkIter {
@@ -706,9 +751,9 @@ mod tests {
     use ndarray::{array, Array, Axis, Ix2, s, stack};
     use ndarray_rand::RandomExt;
     use rand::distributions::Uniform;
-    use tempfile::NamedTempFile;
+    use tempfile::{NamedTempFile, TempPath};
 
-    use super::PlinkBed;
+    use crate::plink_bed::{PlinkSnpType, convert_to_dominance_representation, PlinkBed};
 
     fn create_dummy_bim_fam(
         mut bim: &mut NamedTempFile,
@@ -755,7 +800,10 @@ mod tests {
                        bim.into_temp_path().to_str().unwrap().to_string(),
                        fam.into_temp_path().to_str().unwrap().to_string())]
             ).unwrap();
-            assert_eq!(geno.mapv(|x| x as f32), geno_bed.get_genotype_matrix(None).unwrap());
+            assert_eq!(
+                geno.mapv(|x| x as f32),
+                geno_bed.get_genotype_matrix(None, PlinkSnpType::Additive).unwrap()
+            );
         }
         test(&array![
             [0],
@@ -849,7 +897,7 @@ mod tests {
             ]
         ).unwrap();
         let true_geno_arr = stack![Axis(1), geno_1, geno_2].mapv(|x| x as f32);
-        assert_eq!(true_geno_arr, bed.get_genotype_matrix(None).unwrap());
+        assert_eq!(true_geno_arr, bed.get_genotype_matrix(None, PlinkSnpType::Additive).unwrap());
     }
 
     #[test]
@@ -873,16 +921,18 @@ mod tests {
         let true_geno_arr = geno.mapv(|x| x as f32);
 
         // test get_genotype_matrix
-        assert_eq!(bed.get_genotype_matrix(None).unwrap(), true_geno_arr);
+        assert_eq!(bed.get_genotype_matrix(None, PlinkSnpType::Additive).unwrap(), true_geno_arr);
 
         let chunk_size = 5;
-        for (i, snps) in bed.col_chunk_iter(chunk_size, None).enumerate() {
+        for (i, snps) in bed.col_chunk_iter(chunk_size, None, PlinkSnpType::Additive).enumerate() {
             let end_index = min((i + 1) * chunk_size, true_geno_arr.dim().1);
             assert!(true_geno_arr.slice(s![..,i * chunk_size..end_index]) == snps);
         }
 
         let snp_index_slices = OrderedIntegerSet::from_slice(&[[2, 4], [6, 9], [20, 46], [70, 70]]);
-        for (i, snps) in bed.col_chunk_iter(chunk_size, Some(snp_index_slices.clone())).enumerate() {
+        for (i, snps) in bed
+            .col_chunk_iter(chunk_size, Some(snp_index_slices.clone()), PlinkSnpType::Additive)
+            .enumerate() {
             let end_index = min((i + 1) * chunk_size, true_geno_arr.dim().1);
             let snp_indices = snp_index_slices.slice(i * chunk_size..end_index);
             for (k, j) in snp_indices.to_iter().enumerate() {
@@ -891,7 +941,10 @@ mod tests {
         }
 
         // test get_genotype_matrix
-        let geno = bed.get_genotype_matrix(Some(snp_index_slices.clone())).unwrap();
+        let geno = bed.get_genotype_matrix(
+            Some(snp_index_slices.clone()),
+            PlinkSnpType::Additive,
+        ).unwrap();
         let mut arr = Array::zeros((num_people, 35));
         let mut jj = 0;
         for j in snp_index_slices.to_iter() {
@@ -903,19 +956,37 @@ mod tests {
         assert_eq!(arr, geno);
     }
 
+    fn create_temp_geno_bfile(geno: &Array<u8, Ix2>) -> (TempPath, TempPath, TempPath) {
+        let mut bim = NamedTempFile::new().unwrap();
+        let mut fam = NamedTempFile::new().unwrap();
+        create_dummy_bim_fam(&mut bim, &mut fam, geno.dim().0, geno.dim().1).unwrap();
+        let bed_path = NamedTempFile::new().unwrap().into_temp_path();
+        let bed_path_str = bed_path.to_str().unwrap().to_string();
+        PlinkBed::create_bed(&geno, &bed_path_str).unwrap();
+        let bim_path = bim.into_temp_path();
+        let fam_path = fam.into_temp_path();
+        (bed_path, bim_path, fam_path)
+    }
+
+    fn assert_arr_almost_eq_f32(arr1: &Array<f32, Ix2>, arr2: &Array<f32, Ix2>, eps: f32) {
+        let (num_rows, num_cols) = arr1.dim();
+        assert_eq!((num_rows, num_cols), arr2.dim());
+        for i in 0..num_rows {
+            for j in 0..num_cols {
+                assert!(
+                    (arr1[[i, j]] - arr2[[i, j]]).abs() < eps,
+                    "arr1[{}, {}]: {} arr2[{}, {}]: {} ", i, j, arr1[[i, j]], i, j, arr2[[i, j]]
+                );
+            }
+        }
+    }
+
     #[test]
     fn test_create_dominance_geno_bed() {
         fn test(geno: &Array<u8, Ix2>) {
-            let mut bim = NamedTempFile::new().unwrap();
-            let mut fam = NamedTempFile::new().unwrap();
-            create_dummy_bim_fam(&mut bim, &mut fam, geno.dim().0, geno.dim().1).unwrap();
-            let bed_path = NamedTempFile::new().unwrap().into_temp_path();
-            let bed_path_str = bed_path.to_str().unwrap().to_string();
-            let bim_path = bim.into_temp_path();
-            let fam_path = fam.into_temp_path();
-            PlinkBed::create_bed(&geno, &bed_path_str).unwrap();
+            let (bed_path, bim_path, fam_path) = create_temp_geno_bfile(geno);
             let geno_bed = PlinkBed::new(
-                &vec![(bed_path_str,
+                &vec![(bed_path.to_str().unwrap().to_string(),
                        bim_path.to_str().unwrap().to_string(),
                        fam_path.to_str().unwrap().to_string())]
             ).unwrap();
@@ -927,13 +998,13 @@ mod tests {
                        fam_path.to_str().unwrap().to_string())]
             ).unwrap();
             assert_eq!(
-                geno_bed.get_genotype_matrix(None)
+                geno_bed.get_genotype_matrix(None, PlinkSnpType::Additive)
                         .unwrap()
                         .mapv(|s| match s as u8 {
                             2 => 1u8,
                             s => s,
                         }),
-                dominance_geno.get_genotype_matrix(None)
+                dominance_geno.get_genotype_matrix(None, PlinkSnpType::Additive)
                               .unwrap()
                               .mapv(|s| s as u8)
             );
@@ -991,5 +1062,42 @@ mod tests {
             [1, 0, 1, 1, 0, 0, 0, 2, 0],
             [2, 1, 0, 2, 0, 0, 1, 1, 2],
         ]);
+    }
+
+    #[test]
+    fn test_convert_to_dominance_representation() {
+        fn test(standard_snp_arr: Array<u8, Ix2>, expected: Array<f32, Ix2>) {
+            let (bed_path, bim_path, fam_path) = create_temp_geno_bfile(&standard_snp_arr);
+
+            let eps = 1e-6;
+            let actual = convert_to_dominance_representation(standard_snp_arr.mapv(|x| x as f32));
+            assert_arr_almost_eq_f32(&actual, &expected, eps);
+
+            let geno_bed = PlinkBed::new(
+                &vec![(bed_path.to_str().unwrap().to_string(),
+                       bim_path.to_str().unwrap().to_string(),
+                       fam_path.to_str().unwrap().to_string())]
+            ).unwrap();
+            let dominance_snps = geno_bed.get_genotype_matrix(None, PlinkSnpType::Dominance)
+                                         .unwrap();
+            assert_arr_almost_eq_f32(&dominance_snps, &expected, eps)
+        }
+
+        test(
+            array![
+                [0, 1, 2, 2, 2, 0],
+                [2, 2, 0, 1, 2, 0],
+                [1, 1, 2, 1, 0, 0],
+                [1, 0, 1, 2, 1, 2],
+                [0, 2, 2, 1, 1, 1],
+            ],
+            array![
+                [0.,   1.2,  0.8,  0.8,  0.4,  0.],
+                [-0.4, 0.4,  0.,   1.4,  0.4,  0.],
+                [0.8,  1.2,  0.8,  1.4,  0.,   0.],
+                [0.8,  0.,   1.4,  0.8,  1.2,  -0.8],
+                [0.,   0.4,  0.8,  1.4,  1.2,  0.6],
+            ],
+        );
     }
 }
