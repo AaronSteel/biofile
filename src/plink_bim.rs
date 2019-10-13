@@ -249,12 +249,12 @@ impl PlinkBim {
 
 #[derive(Clone, Debug)]
 pub struct FilelinePartitions {
-    partitions: HashMap<PartitionKey, OrderedIntegerSet<usize>>,
+    partitions: HashMap<PartitionKey, Partition>,
     ordered_partition_keys: Vec<String>,
 }
 
 impl FilelinePartitions {
-    pub fn new(partitions: HashMap<PartitionKey, OrderedIntegerSet<usize>>) -> FilelinePartitions {
+    pub fn new(partitions: HashMap<PartitionKey, Partition>) -> FilelinePartitions {
         let ordered_partition_keys = FilelinePartitions::get_ordered_keys(&partitions);
         FilelinePartitions {
             partitions,
@@ -262,7 +262,7 @@ impl FilelinePartitions {
         }
     }
 
-    fn get_ordered_keys(partitions: &HashMap<PartitionKey, OrderedIntegerSet<usize>>) -> Vec<PartitionKey> {
+    fn get_ordered_keys(partitions: &HashMap<PartitionKey, Partition>) -> Vec<PartitionKey> {
         let mut keys: Vec<PartitionKey> = partitions.keys().map(|s| s.to_string()).collect();
         if keys.iter().filter(|&k| k.parse::<i32>().is_err()).count() > 0 {
             keys.sort();
@@ -284,12 +284,12 @@ impl FilelinePartitions {
     }
 
     #[inline]
-    pub fn to_hash_map(&self) -> HashMap<PartitionKey, OrderedIntegerSet<usize>> {
+    pub fn to_hash_map(&self) -> HashMap<PartitionKey, Partition> {
         self.partitions.clone()
     }
 
     #[inline]
-    pub fn into_hash_map(self) -> HashMap<PartitionKey, OrderedIntegerSet<usize>> {
+    pub fn into_hash_map(self) -> HashMap<PartitionKey, Partition> {
         self.partitions
     }
 
