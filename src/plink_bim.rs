@@ -4,6 +4,7 @@ use std::io::{BufRead, BufReader};
 use std::iter::FromIterator;
 use std::slice::Iter;
 
+use analytic::partition::integer_partitions::Partition;
 use analytic::set::ordered_integer_set::OrderedIntegerSet;
 use analytic::traits::Collecting;
 
@@ -274,6 +275,12 @@ impl FilelinePartitions {
     #[inline]
     pub fn ordered_partition_keys(&self) -> &Vec<PartitionKey> {
         &self.ordered_partition_keys
+    }
+
+    pub fn ordered_partition_array(&self) -> Vec<Partition> {
+        self.iter()
+            .map(|(_, p)| p.clone())
+            .collect()
     }
 
     #[inline]
