@@ -103,8 +103,8 @@ impl Iterator for PeakFileIter {
     fn next(&mut self) -> Option<Self::Item> {
         loop {
             let mut line = String::new();
-            if self.buf.read_line(&mut line).unwrap() == 0 {
-                return None;
+            return if self.buf.read_line(&mut line).unwrap() == 0 {
+                None
             } else {
                 let mut toks = line.split_whitespace();
                 let chrom = {
@@ -133,7 +133,7 @@ impl Iterator for PeakFileIter {
                     Some(p) => Some(p.parse::<usize>().unwrap()),
                     None => None,
                 };
-                return Some(PeakFileDataLine {
+                Some(PeakFileDataLine {
                     chrom,
                     start,
                     end,
@@ -144,7 +144,7 @@ impl Iterator for PeakFileIter {
                     p_value,
                     q_value,
                     peak,
-                });
+                })
             }
         }
     }
