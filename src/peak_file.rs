@@ -50,7 +50,7 @@ impl PeakFile {
                         continue;
                     }
                 }
-                let interval_to_val = chrom_to_intervals.entry(chrom).or_insert(Vec::new());
+                let interval_to_val = chrom_to_intervals.entry(chrom).or_insert_with(Vec::new);
                 interval_to_val.push(ContiguousIntegerSet::new(start, end - 1));
             }
         }
@@ -110,7 +110,7 @@ impl Iterator for PeakFileIter {
                 let mut toks = line.split_whitespace();
                 let chrom = {
                     let chrom = toks.next().unwrap();
-                    if chrom.starts_with("#") || chrom == "track" {
+                    if chrom.starts_with('#') || chrom == "track" {
                         continue;
                     }
                     chrom.to_string()

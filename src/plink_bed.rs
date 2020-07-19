@@ -1,22 +1,28 @@
-use std::cmp::min;
-use std::collections::HashSet;
-use std::fs::{File, OpenOptions};
-use std::io;
-use std::io::{BufRead, BufReader, BufWriter, Read, Seek, SeekFrom, Write};
+use std::{
+    cmp::min,
+    collections::HashSet,
+    fs::{File, OpenOptions},
+    io,
+    io::{BufRead, BufReader, BufWriter, Read, Seek, SeekFrom, Write},
+};
 
-use analytic::set::ordered_integer_set::OrderedIntegerSet;
-use analytic::set::traits::{Finite, Set};
-use analytic::stats::sum_f32;
-use analytic::traits::ToIterator;
+use analytic::{
+    set::{
+        ordered_integer_set::OrderedIntegerSet,
+        traits::{Finite, Set},
+    },
+    stats::sum_f32,
+    traits::ToIterator,
+};
 use ndarray::{Array, Axis, Ix2, ShapeBuilder};
-use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
-use rayon::iter::plumbing::{bridge, Consumer, Producer, ProducerCallback, UnindexedConsumer};
+use rayon::iter::{
+    plumbing::{bridge, Consumer, Producer, ProducerCallback, UnindexedConsumer},
+    IndexedParallelIterator, IntoParallelIterator, ParallelIterator,
+};
 
 use plink_snps::PlinkSnps;
 
-use crate::byte_chunk_iter::ByteChunkIter;
-use crate::error::Error;
-use crate::util::get_buf;
+use crate::{byte_chunk_iter::ByteChunkIter, error::Error, util::get_buf};
 
 pub const MAGIC_BYTES: [u8; 3] = [0x6c_u8, 0x1b_u8, 0x01_u8];
 pub const NUM_MAGIC_BYTES: usize = 3;
@@ -33,19 +39,14 @@ pub struct PlinkBed {
 impl PlinkBed {
     /// `bfile_path_list` contains Vec<(bed, bim, fam)>
     pub fn new(
-        bfile_path_list: &Vec<(String, String, String, PlinkSnpType)>,
+        bfile_path_list: &[(String, String, String, PlinkSnpType)],
     ) -> Result<PlinkBed, Error> {
         if bfile_path_list.is_empty() {
             return Err(Error::Generic(
-                "the bfile_path_list has to contain at least one element".to_string()
+                "the bfile_path_list has to contain at least one element".to_string(),
             ));
         }
-        let bed_path_list: Vec<String> = bfile_path_list
-            .iter()
-            .map(|t| {
-                t.0.to_string()
-            })
-            .collect();
+        let bed_path_list: Vec<String> = bfile_path_list.iter().map(|t| t.0.to_string()).collect();
 
         for p in bed_path_list.iter() {
             PlinkBed::verify_magic_bytes(&p)?;
@@ -56,7 +57,9 @@ impl PlinkBed {
             .map(|t| {
                 let num_snps = get_line_count(&t.1)?;
                 if num_snps == 0 {
-                    Err(Error::Generic("cannot create PlinkBed with 0 SNPs".to_string()))
+                    Err(Error::Generic(
+                        "cannot create PlinkBed with 0 SNPs".to_string(),
+                    ))
                 } else {
                     Ok((num_snps, t.3))
                 }
@@ -69,20 +72,30 @@ impl PlinkBed {
                 .map(|t| Ok(get_line_count(&t.2)?))
                 .collect::<Result<HashSet<usize>, Error>>()?;
             if num_people_set.len() > 1 {
-                return Err(Error::Generic("inconsistent number of people across the bed files".to_string()));
+                return Err(Error::Generic(
+                    "inconsistent number of people across the bed files".to_string(),
+                ));
             }
-            let num_people = num_people_set.into_iter().map(|x| x).collect::<Vec<usize>>()[0];
+            let num_people = num_people_set
+                .into_iter()
+                .map(|x| x)
+                .collect::<Vec<usize>>()[0];
             if num_people == 0 {
-                return Err(Error::Generic("cannot create PlinkBed with 0 people".to_string()));
+                return Err(Error::Generic(
+                    "cannot create PlinkBed with 0 people".to_string(),
+                ));
             }
             num_people
         };
 
         println!("----------");
-        bed_path_list.iter().zip(file_num_snps.iter()).for_each(|(p, n)| {
-            println!("{} num_snps: {}", p, n.0);
-        });
-        println!("num_people: {}\n----------", num_people, );
+        bed_path_list
+            .iter()
+            .zip(file_num_snps.iter())
+            .for_each(|(p, n)| {
+                println!("{} num_snps: {}", p, n.0);
+            });
+        println!("num_people: {}\n----------", num_people,);
 
         Ok(PlinkBed {
             bed_path_list,
@@ -104,15 +117,13 @@ impl PlinkBed {
                 self.num_people,
                 self.bed_path_list.clone(),
             ),
-            None => {
-                PlinkColChunkIter::new(
-                    self.file_num_snps.clone(),
-                    OrderedIntegerSet::from_slice(&[[0, self.total_num_snps() - 1]]),
-                    num_snps_per_iter,
-                    self.num_people,
-                    self.bed_path_list.clone(),
-                )
-            }
+            None => PlinkColChunkIter::new(
+                self.file_num_snps.clone(),
+                OrderedIntegerSet::from_slice(&[[0, self.total_num_snps() - 1]]),
+                num_snps_per_iter,
+                self.num_people,
+                self.bed_path_list.clone(),
+            ),
         }
     }
 
@@ -127,18 +138,25 @@ impl PlinkBed {
             Some(p) => {
                 let buf = match OpenOptions::new().read(true).open(p) {
                     Ok(file) => BufReader::new(file),
-                    Err(io_error) => return Err(
-                        Error::IO {
+                    Err(io_error) => {
+                        return Err(Error::IO {
                             why: format!("failed to open {}: {}", p, io_error),
                             io_error,
-                        }
-                    ),
+                        })
+                    }
                 };
-                Ok(ByteChunkIter::new(buf, start_byte_index, end_byte_index_exclusive, chunk_size))
+                Ok(ByteChunkIter::new(
+                    buf,
+                    start_byte_index,
+                    end_byte_index_exclusive,
+                    chunk_size,
+                ))
             }
             None => Err(Error::Generic(format!(
-                "file index out of range {} >= {}", file_index, self.bed_path_list.len()
-            )))
+                "file index out of range {} >= {}",
+                file_index,
+                self.bed_path_list.len()
+            ))),
         }
     }
 
@@ -148,17 +166,16 @@ impl PlinkBed {
     ) -> Result<Array<f32, Ix2>, Error> {
         let num_snps = match &snps_range {
             None => self.total_num_snps(),
-            Some(range) => range.size()
+            Some(range) => range.size(),
         };
         let mut v = Vec::with_capacity(self.num_people * num_snps);
 
         for snp_chunk in self.col_chunk_iter(100, snps_range) {
             v.append(&mut snp_chunk.t().to_owned().as_slice().unwrap().to_vec());
         }
-        let geno_arr = Array::from_shape_vec(
-            (self.num_people, num_snps).strides((1, self.num_people)),
-            v,
-        ).unwrap();
+        let geno_arr =
+            Array::from_shape_vec((self.num_people, num_snps).strides((1, self.num_people)), v)
+                .unwrap();
         Ok(geno_arr)
     }
 
@@ -189,7 +206,8 @@ impl PlinkBed {
 
     /// save the transpose of the BED file into `out_path`, which should have an extension of .bedt
     /// wherein the n-th sequence of bytes corresponds to the SNPs for the n-th person
-    /// larger values of `snp_byte_chunk_size` lead to faster performance, at the cost of higher memory requirement
+    /// larger values of `snp_byte_chunk_size` lead to faster performance, at the cost of higher
+    /// memory requirement
     pub fn create_bed_t(
         &mut self,
         file_index: usize,
@@ -202,7 +220,11 @@ impl PlinkBed {
             Some(p) => {
                 let mut bed_buf = get_buf(p)?;
                 let mut buf_writer = BufWriter::new(
-                    OpenOptions::new().create(true).truncate(true).write(true).open(out_path)?
+                    OpenOptions::new()
+                        .create(true)
+                        .truncate(true)
+                        .write(true)
+                        .open(out_path)?,
                 );
                 let num_bytes_per_person = usize_div_ceil(total_num_snps, 4);
 
@@ -218,39 +240,58 @@ impl PlinkBed {
                     }
                     let relative_seek_offset = (num_bytes_per_snp - snp_bytes.len()) as i64;
                     // read 4 SNPs to the buffers at a time
-                    PlinkBed::seek_to_byte_containing_snp_i_person_j(&mut bed_buf, 0, j, num_bytes_per_snp)?;
+                    PlinkBed::seek_to_byte_containing_snp_i_person_j(
+                        &mut bed_buf,
+                        0,
+                        j,
+                        num_bytes_per_snp,
+                    )?;
                     for (snp_byte_index, k) in (0..total_num_snps).step_by(4).enumerate() {
                         for (snp_offset, _) in (k..min(k + 4, total_num_snps)).enumerate() {
                             bed_buf.read_exact(&mut snp_bytes)?;
                             for w in 0..snp_bytes.len() {
-                                people_buf[w + 0][snp_byte_index] |= (snp_bytes[w] & 0b11) << (snp_offset << 1);
-                                people_buf[w + 1][snp_byte_index] |= ((snp_bytes[w] >> 2) & 0b11) << (snp_offset << 1);
-                                people_buf[w + 2][snp_byte_index] |= ((snp_bytes[w] >> 4) & 0b11) << (snp_offset << 1);
-                                people_buf[w + 3][snp_byte_index] |= ((snp_bytes[w] >> 6) & 0b11) << (snp_offset << 1);
+                                people_buf[w][snp_byte_index] |=
+                                    (snp_bytes[w] & 0b11) << (snp_offset << 1);
+                                people_buf[w + 1][snp_byte_index] |=
+                                    ((snp_bytes[w] >> 2) & 0b11) << (snp_offset << 1);
+                                people_buf[w + 2][snp_byte_index] |=
+                                    ((snp_bytes[w] >> 4) & 0b11) << (snp_offset << 1);
+                                people_buf[w + 3][snp_byte_index] |=
+                                    ((snp_bytes[w] >> 6) & 0b11) << (snp_offset << 1);
                             }
                             bed_buf.seek_relative(relative_seek_offset)?;
                         }
                     }
                     for (p, buf) in people_buf.iter().enumerate() {
                         if j + p < self.num_people {
-                            buf_writer.write(buf.as_slice())?;
+                            buf_writer.write_all(buf.as_slice())?;
                         }
                     }
                 }
                 Ok(())
             }
             None => Err(Error::Generic(format!(
-                "file index out of range {} >= {}", file_index, self.bed_path_list.len()
-            )))
+                "file index out of range {} >= {}",
+                file_index,
+                self.bed_path_list.len()
+            ))),
         }
     }
 
-    pub fn create_dominance_geno_bed(&self, file_index: usize, out_path: &str) -> Result<(), Error> {
+    pub fn create_dominance_geno_bed(
+        &self,
+        file_index: usize,
+        out_path: &str,
+    ) -> Result<(), Error> {
         let num_bytes_per_snp = PlinkBed::num_bytes_per_snp(self.num_people);
         let mut writer = BufWriter::new(
-            OpenOptions::new().create(true).truncate(true).write(true).open(out_path)?
+            OpenOptions::new()
+                .create(true)
+                .truncate(true)
+                .write(true)
+                .open(out_path)?,
         );
-        writer.write(&PlinkBed::get_magic_bytes())?;
+        writer.write_all(&PlinkBed::get_magic_bytes())?;
         for bytes in self.byte_chunk_iter(
             file_index,
             NUM_MAGIC_BYTES,
@@ -264,9 +305,10 @@ impl PlinkBed {
                         2 => 1,
                         s => s,
                     })
-                    .collect()
-            ).into_bytes();
-            writer.write(&out_bytes)?;
+                    .collect(),
+            )
+            .into_bytes();
+            writer.write_all(&out_bytes)?;
         }
         Ok(())
     }
@@ -278,17 +320,21 @@ impl PlinkBed {
     // 11 -> 0 homozygous for the second allele in the .bim file (usually the major allele)
     pub fn create_bed(arr: &Array<u8, Ix2>, out_path: &str) -> Result<(), Error> {
         let (num_people, _num_snps) = arr.dim();
-        let mut buf_writer = BufWriter::new(OpenOptions::new().create(true).truncate(true).write(true).open(out_path)?);
-        buf_writer.write(&[0x6c, 0x1b, 0x1])?;
+        let mut buf_writer = BufWriter::new(
+            OpenOptions::new()
+                .create(true)
+                .truncate(true)
+                .write(true)
+                .open(out_path)?,
+        );
+        buf_writer.write_all(&[0x6c, 0x1b, 0x1])?;
         for col in arr.gencolumns() {
             let mut i = 0;
             for _ in 0..num_people / 4 {
-                buf_writer.write(&[
-                    geno_to_lowest_two_bits(col[i])
-                        | (geno_to_lowest_two_bits(col[i + 1]) << 2)
-                        | (geno_to_lowest_two_bits(col[i + 2]) << 4)
-                        | (geno_to_lowest_two_bits(col[i + 3]) << 6)
-                ])?;
+                buf_writer.write_all(&[geno_to_lowest_two_bits(col[i])
+                    | (geno_to_lowest_two_bits(col[i + 1]) << 2)
+                    | (geno_to_lowest_two_bits(col[i + 2]) << 4)
+                    | (geno_to_lowest_two_bits(col[i + 3]) << 6)])?;
                 i += 4;
             }
             let remainder = num_people % 4;
@@ -297,7 +343,7 @@ impl PlinkBed {
                 for j in 0..remainder {
                     byte |= geno_to_lowest_two_bits(col[i + j]) << (j * 2);
                 }
-                buf_writer.write(&[byte])?;
+                buf_writer.write_all(&[byte])?;
             }
         }
         Ok(())
@@ -309,12 +355,13 @@ impl PlinkBed {
         // check if PLINK bed file has the correct file signature
         let mut magic_bytes = [0u8; 3];
         if let Err(io_error) = bed_buf.read_exact(&mut magic_bytes) {
-            return Err(
-                Error::IO {
-                    why: format!("Failed to read the first three bytes of {}: {}", bed_filepath, io_error),
-                    io_error,
-                }
-            );
+            return Err(Error::IO {
+                why: format!(
+                    "Failed to read the first three bytes of {}: {}",
+                    bed_filepath, io_error
+                ),
+                io_error,
+            });
         }
         let expected_bytes = PlinkBed::get_magic_bytes();
         if magic_bytes != expected_bytes {
@@ -351,7 +398,7 @@ impl PlinkBed {
     ) -> Result<(), io::Error> {
         // the first NUM_MAGIC_BYTES bytes are the file signature
         buf.seek(SeekFrom::Start(
-            (NUM_MAGIC_BYTES + num_bytes_per_snp * snp_i + person_j / NUM_PEOPLE_PER_BYTE) as u64
+            (NUM_MAGIC_BYTES + num_bytes_per_snp * snp_i + person_j / NUM_PEOPLE_PER_BYTE) as u64,
         ))?;
         Ok(())
     }
@@ -387,7 +434,7 @@ fn get_num_people_last_byte(total_num_people: usize) -> Option<usize> {
     } else {
         match total_num_people % NUM_PEOPLE_PER_BYTE {
             0 => Some(NUM_PEOPLE_PER_BYTE),
-            x => Some(x)
+            x => Some(x),
         }
     }
 }
@@ -473,33 +520,33 @@ impl PlinkColChunkIter {
         iter
     }
 
-    fn get_buf_list(bed_path_list: &Vec<String>) -> Result<Vec<BufReader<File>>, Error> {
-        Ok(
-            bed_path_list
-                .iter()
-                .map(|p| Ok(get_buf(p)?))
-                .collect::<Result<Vec<BufReader<File>>, Error>>()?
-        )
+    fn get_buf_list(bed_path_list: &[String]) -> Result<Vec<BufReader<File>>, Error> {
+        Ok(bed_path_list
+            .iter()
+            .map(|p| Ok(get_buf(p)?))
+            .collect::<Result<Vec<BufReader<File>>, Error>>()?)
     }
 
     fn seek_to_snp(&mut self, snp_index: usize) -> Result<(), Error> {
         if !self.range.contains(snp_index) {
-            return Err(Error::Generic(format!("SNP index {} is not in the iterator range", snp_index)));
+            return Err(Error::Generic(format!(
+                "SNP index {} is not in the iterator range",
+                snp_index
+            )));
         }
         let num_bytes_per_snp = PlinkBed::num_bytes_per_snp(self.num_people);
         match self.file_snp_indexer.get_file_snp_index(snp_index) {
             Some((file_index, snp_index_within_file, _snp_type)) => {
                 // skip the first NUM_MAGIC_BYTES magic bytes
-                self.buf[file_index].seek(
-                    SeekFrom::Start(
-                        NUM_MAGIC_BYTES as u64 + (num_bytes_per_snp * snp_index_within_file) as u64
-                    )
-                )?;
+                self.buf[file_index].seek(SeekFrom::Start(
+                    NUM_MAGIC_BYTES as u64 + (num_bytes_per_snp * snp_index_within_file) as u64,
+                ))?;
                 Ok(())
             }
             None => Err(Error::Generic(format!(
-                "failed to get file snp index for snp_index {}", snp_index
-            )))
+                "failed to get file snp index for snp_index {}",
+                snp_index
+            ))),
         }
     }
 
@@ -511,11 +558,15 @@ impl PlinkColChunkIter {
         let num_bytes_per_snp = PlinkBed::num_bytes_per_snp(self.num_people);
         match self.file_snp_indexer.get_file_snp_index(snp_index) {
             Some((file_index, snp_index_within_file, snp_type)) => {
-                if let Some((last_file_index, last_snp_index_within_file)) = self.last_read_file_snp_index {
+                if let Some((last_file_index, last_snp_index_within_file)) =
+                    self.last_read_file_snp_index
+                {
                     if file_index == last_file_index {
                         let snp_index_gap = snp_index_within_file - last_snp_index_within_file;
                         if snp_index_gap > 1 {
-                            self.buf[file_index].seek_relative(((snp_index_gap - 1) * num_bytes_per_snp) as i64).unwrap();
+                            self.buf[file_index]
+                                .seek_relative(((snp_index_gap - 1) * num_bytes_per_snp) as i64)
+                                .unwrap();
                         }
                         self.buf[file_index].read_exact(&mut snp_bytes_buf)?;
                         self.last_read_file_snp_index = Some((file_index, snp_index_within_file));
@@ -527,7 +578,10 @@ impl PlinkColChunkIter {
                 self.last_read_file_snp_index = Some((file_index, snp_index_within_file));
                 Ok(snp_type)
             }
-            None => Err(Error::Generic(format!("SNP index {} out of range", snp_index)))
+            None => Err(Error::Generic(format!(
+                "SNP index {} out of range",
+                snp_index
+            ))),
         }
     }
 
@@ -547,7 +601,9 @@ impl PlinkColChunkIter {
         let num_bytes_per_snp = PlinkBed::num_bytes_per_snp(self.num_people);
         let num_people_last_byte = get_num_people_last_byte(self.num_people).unwrap_or(0);
 
-        let snp_indices = self.range.slice(self.range_cursor..self.range_cursor + chunk_size);
+        let snp_indices = self
+            .range
+            .slice(self.range_cursor..self.range_cursor + chunk_size);
         let actual_chunk_size = snp_indices.size();
         self.range_cursor += actual_chunk_size;
 
@@ -564,7 +620,9 @@ impl PlinkColChunkIter {
             }
             // last byte
             for k in 0..num_people_last_byte {
-                snp_vec.push(lowest_two_bits_to_geno(snp_bytes[num_bytes_per_snp - 1] >> (k << 1)) as f32);
+                snp_vec.push(
+                    lowest_two_bits_to_geno(snp_bytes[num_bytes_per_snp - 1] >> (k << 1)) as f32,
+                );
             }
             v.append(&mut match snp_type {
                 PlinkSnpType::Additive => snp_vec,
@@ -574,7 +632,8 @@ impl PlinkColChunkIter {
         Array::from_shape_vec(
             (self.num_people, actual_chunk_size).strides((1, self.num_people)),
             v,
-        ).unwrap()
+        )
+        .unwrap()
     }
 }
 
@@ -588,13 +647,15 @@ fn convert_geno_vec_to_dominance_representation(mut geno_vec: Vec<f32>) -> Vec<f
         geno_vec[i] = match geno_vec[i] as u8 {
             2 => homo_minor,
             1 => hetero,
-            _ => 0.
+            _ => 0.,
         };
     }
     geno_vec
 }
 
-pub fn convert_geno_arr_to_dominance_representation(mut geno_arr: Array<f32, Ix2>) -> Array<f32, Ix2> {
+pub fn convert_geno_arr_to_dominance_representation(
+    mut geno_arr: Array<f32, Ix2>,
+) -> Array<f32, Ix2> {
     let num_people = geno_arr.dim().0;
     let double_num_people = (2 * num_people) as f32;
     for mut col in geno_arr.axis_iter_mut(Axis(1)) {
@@ -605,7 +666,7 @@ pub fn convert_geno_arr_to_dominance_representation(mut geno_arr: Array<f32, Ix2
             col[i] = match col[i] as u8 {
                 2 => homo_minor,
                 1 => hetero,
-                _ => 0.
+                _ => 0.,
             };
         }
     }
@@ -613,11 +674,13 @@ pub fn convert_geno_arr_to_dominance_representation(mut geno_arr: Array<f32, Ix2
 }
 
 impl IntoParallelIterator for PlinkColChunkIter {
-    type Iter = PlinkColChunkParallelIter;
     type Item = <PlinkColChunkParallelIter as ParallelIterator>::Item;
+    type Iter = PlinkColChunkParallelIter;
 
     fn into_par_iter(self) -> Self::Iter {
-        PlinkColChunkParallelIter { iter: self }
+        PlinkColChunkParallelIter {
+            iter: self,
+        }
     }
 }
 
@@ -628,14 +691,20 @@ impl Iterator for PlinkColChunkIter {
         if self.range_cursor >= self.num_snps_in_range {
             return None;
         }
-        let chunk_size = min(self.num_snps_per_iter, self.num_snps_in_range - self.range_cursor);
+        let chunk_size = min(
+            self.num_snps_per_iter,
+            self.num_snps_in_range - self.range_cursor,
+        );
         Some(self.read_chunk(chunk_size))
     }
 }
 
 impl ExactSizeIterator for PlinkColChunkIter {
     fn len(&self) -> usize {
-        usize_div_ceil(self.num_snps_in_range - self.range_cursor, self.num_snps_per_iter)
+        usize_div_ceil(
+            self.num_snps_in_range - self.range_cursor,
+            self.num_snps_per_iter,
+        )
     }
 }
 
@@ -644,24 +713,38 @@ impl DoubleEndedIterator for PlinkColChunkIter {
         if self.range_cursor >= self.num_snps_in_range {
             return None;
         }
-        let chunk_size = min(self.num_snps_per_iter, self.num_snps_in_range - self.range_cursor);
+        let chunk_size = min(
+            self.num_snps_per_iter,
+            self.num_snps_in_range - self.range_cursor,
+        );
         // reading from the back is equivalent to reducing the number of SNPs in range
         self.num_snps_in_range -= chunk_size;
 
         // save and restore self.last_read_snp_index after the call to self.read_chunk
-        // we set the self.last_read_snp_index to None to prevent self.read_chunk from performing seek_relative on the buffer
+        // we set the self.last_read_snp_index to None to prevent self.read_chunk from performing
+        // seek_relative on the buffer
         let last_read_snp_index = self.last_read_file_snp_index;
         self.last_read_file_snp_index = None;
 
-        let snp = self.range.slice(self.num_snps_in_range..self.num_snps_in_range + 1).first().unwrap();
+        let snp = self
+            .range
+            .slice(self.num_snps_in_range..self.num_snps_in_range + 1)
+            .first()
+            .unwrap();
         self.seek_to_snp(snp).unwrap();
         let chunk = self.read_chunk(chunk_size);
         match last_read_snp_index {
             Some((file_i, snp_i)) => {
-                let snp_index = self.file_num_snps.iter().take(file_i).map(|pair| pair.0).sum::<usize>() + snp_i;
+                let snp_index = self
+                    .file_num_snps
+                    .iter()
+                    .take(file_i)
+                    .map(|pair| pair.0)
+                    .sum::<usize>()
+                    + snp_i;
                 self.seek_to_snp(snp_index).unwrap();
             }
-            None => self.seek_to_snp(0).unwrap()
+            None => self.seek_to_snp(0).unwrap(),
         };
         self.last_read_file_snp_index = last_read_snp_index;
         Some(chunk)
@@ -673,8 +756,8 @@ struct ColChunkIterProducer {
 }
 
 impl Producer for ColChunkIterProducer {
-    type Item = <PlinkColChunkIter as Iterator>::Item;
     type IntoIter = PlinkColChunkIter;
+    type Item = <PlinkColChunkIter as Iterator>::Item;
 
     #[inline]
     fn into_iter(self) -> Self::IntoIter {
@@ -685,18 +768,24 @@ impl Producer for ColChunkIterProducer {
         let mid_range_index = min(self.iter.num_snps_per_iter * index, self.iter.range.size());
         (
             ColChunkIterProducer {
-                iter: self.iter.clone_with_range(self.iter.range.slice(0..mid_range_index))
+                iter: self
+                    .iter
+                    .clone_with_range(self.iter.range.slice(0..mid_range_index)),
             },
             ColChunkIterProducer {
-                iter: self.iter.clone_with_range(self.iter.range.slice(mid_range_index..self.iter.range.size()))
-            }
+                iter: self.iter.clone_with_range(
+                    self.iter
+                        .range
+                        .slice(mid_range_index..self.iter.range.size()),
+                ),
+            },
         )
     }
 }
 
 impl IntoIterator for ColChunkIterProducer {
-    type Item = <PlinkColChunkIter as Iterator>::Item;
     type IntoIter = PlinkColChunkIter;
+    type Item = <PlinkColChunkIter as Iterator>::Item;
 
     #[inline]
     fn into_iter(self) -> Self::IntoIter {
@@ -705,15 +794,15 @@ impl IntoIterator for ColChunkIterProducer {
 }
 
 pub struct PlinkColChunkParallelIter {
-    iter: PlinkColChunkIter
+    iter: PlinkColChunkIter,
 }
 
 impl ParallelIterator for PlinkColChunkParallelIter {
     type Item = <PlinkColChunkIter as Iterator>::Item;
 
     fn drive_unindexed<C>(self, consumer: C) -> C::Result
-        where C: UnindexedConsumer<Self::Item>
-    {
+    where
+        C: UnindexedConsumer<Self::Item>, {
         bridge(self, consumer)
     }
 
@@ -728,27 +817,26 @@ impl IndexedParallelIterator for PlinkColChunkParallelIter {
     }
 
     fn drive<C>(self, consumer: C) -> C::Result
-        where C: Consumer<Self::Item>,
-    {
+    where
+        C: Consumer<Self::Item>, {
         bridge(self, consumer)
     }
 
     fn with_producer<CB>(self, callback: CB) -> CB::Output
-        where CB: ProducerCallback<Self::Item>,
-    {
-        callback.callback(ColChunkIterProducer { iter: self.iter })
+    where
+        CB: ProducerCallback<Self::Item>, {
+        callback.callback(ColChunkIterProducer {
+            iter: self.iter,
+        })
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::cmp::min;
-    use std::io;
-    use std::io::Write;
+    use std::{cmp::min, io, io::Write};
 
-    use analytic::set::ordered_integer_set::OrderedIntegerSet;
-    use analytic::traits::ToIterator;
-    use ndarray::{array, Array, Axis, Ix2, s, stack};
+    use analytic::{set::ordered_integer_set::OrderedIntegerSet, traits::ToIterator};
+    use ndarray::{array, s, stack, Array, Axis, Ix2};
     use ndarray_rand::RandomExt;
     use rand::distributions::Uniform;
     use tempfile::{NamedTempFile, TempPath};
@@ -766,20 +854,14 @@ mod tests {
         Ok(())
     }
 
-    fn write_dummy_bim(
-        bim: &mut NamedTempFile,
-        num_snps: usize,
-    ) -> Result<(), io::Error> {
+    fn write_dummy_bim(bim: &mut NamedTempFile, num_snps: usize) -> Result<(), io::Error> {
         for i in 1..=num_snps {
             bim.write_fmt(format_args!("{}\n", i))?;
         }
         Ok(())
     }
 
-    fn write_dummy_fam(
-        fam: &mut NamedTempFile,
-        num_people: usize,
-    ) -> Result<(), io::Error> {
+    fn write_dummy_fam(fam: &mut NamedTempFile, num_people: usize) -> Result<(), io::Error> {
         for i in 1..=num_people {
             fam.write_fmt(format_args!("{}\n", i))?;
         }
@@ -795,41 +877,24 @@ mod tests {
             let path = NamedTempFile::new().unwrap().into_temp_path();
             let path_str = path.to_str().unwrap().to_string();
             PlinkBed::create_bed(&geno, &path_str).unwrap();
-            let geno_bed = PlinkBed::new(
-                &vec![
-                    (path_str,
-                     bim.into_temp_path().to_str().unwrap().to_string(),
-                     fam.into_temp_path().to_str().unwrap().to_string(),
-                     PlinkSnpType::Additive),
-                ]
-            ).unwrap();
+            let geno_bed = PlinkBed::new(&vec![(
+                path_str,
+                bim.into_temp_path().to_str().unwrap().to_string(),
+                fam.into_temp_path().to_str().unwrap().to_string(),
+                PlinkSnpType::Additive,
+            )])
+            .unwrap();
             assert_eq!(
                 geno.mapv(|x| x as f32),
                 geno_bed.get_genotype_matrix(None).unwrap()
             );
         }
-        test(&array![
-            [0],
-        ]);
-        test(&array![
-            [1],
-        ]);
-        test(&array![
-            [2],
-        ]);
-        test(&array![
-            [0, 1, 2],
-        ]);
-        test(&array![
-            [0],
-            [1],
-            [2],
-        ]);
-        test(&array![
-            [0, 0, 1],
-            [1, 1, 2],
-            [0, 2, 1],
-        ]);
+        test(&array![[0],]);
+        test(&array![[1],]);
+        test(&array![[2],]);
+        test(&array![[0, 1, 2],]);
+        test(&array![[0], [1], [2],]);
+        test(&array![[0, 0, 1], [1, 1, 2], [0, 2, 1],]);
         test(&array![
             [0, 0, 1, 2],
             [1, 1, 2, 1],
@@ -885,22 +950,21 @@ mod tests {
         PlinkBed::create_bed(&geno_1, bed_path_1.to_str().unwrap()).unwrap();
         PlinkBed::create_bed(&geno_2, bed_path_2.to_str().unwrap()).unwrap();
 
-        let bed = PlinkBed::new(
-            &vec![
-                (
-                    bed_path_1.to_str().unwrap().to_string(),
-                    bim_path_1.to_str().unwrap().to_string(),
-                    fam_path.to_str().unwrap().to_string(),
-                    PlinkSnpType::Additive,
-                ),
-                (
-                    bed_path_2.to_str().unwrap().to_string(),
-                    bim_path_2.to_str().unwrap().to_string(),
-                    fam_path.to_str().unwrap().to_string(),
-                    PlinkSnpType::Additive,
-                ),
-            ]
-        ).unwrap();
+        let bed = PlinkBed::new(&vec![
+            (
+                bed_path_1.to_str().unwrap().to_string(),
+                bim_path_1.to_str().unwrap().to_string(),
+                fam_path.to_str().unwrap().to_string(),
+                PlinkSnpType::Additive,
+            ),
+            (
+                bed_path_2.to_str().unwrap().to_string(),
+                bim_path_2.to_str().unwrap().to_string(),
+                fam_path.to_str().unwrap().to_string(),
+                PlinkSnpType::Additive,
+            ),
+        ])
+        .unwrap();
         let true_geno_arr = stack![Axis(1), geno_1, geno_2].mapv(|x| x as f32);
         assert_eq!(true_geno_arr, bed.get_genotype_matrix(None).unwrap());
     }
@@ -918,15 +982,13 @@ mod tests {
         let bed_path_str = bed_path.to_str().unwrap().to_string();
         PlinkBed::create_bed(&geno, &bed_path_str).unwrap();
 
-        let bed = PlinkBed::new(
-            &vec![
-                (bed_path_str,
-                 bim.into_temp_path().to_str().unwrap().to_string(),
-                 fam.into_temp_path().to_str().unwrap().to_string(),
-                 PlinkSnpType::Additive,
-                )
-            ]
-        ).unwrap();
+        let bed = PlinkBed::new(&vec![(
+            bed_path_str,
+            bim.into_temp_path().to_str().unwrap().to_string(),
+            fam.into_temp_path().to_str().unwrap().to_string(),
+            PlinkSnpType::Additive,
+        )])
+        .unwrap();
         let true_geno_arr = geno.mapv(|x| x as f32);
 
         // test get_genotype_matrix
@@ -935,13 +997,14 @@ mod tests {
         let chunk_size = 5;
         for (i, snps) in bed.col_chunk_iter(chunk_size, None).enumerate() {
             let end_index = min((i + 1) * chunk_size, true_geno_arr.dim().1);
-            assert!(true_geno_arr.slice(s![..,i * chunk_size..end_index]) == snps);
+            assert!(true_geno_arr.slice(s![.., i * chunk_size..end_index]) == snps);
         }
 
         let snp_index_slices = OrderedIntegerSet::from_slice(&[[2, 4], [6, 9], [20, 46], [70, 70]]);
         for (i, snps) in bed
             .col_chunk_iter(chunk_size, Some(snp_index_slices.clone()))
-            .enumerate() {
+            .enumerate()
+        {
             let end_index = min((i + 1) * chunk_size, true_geno_arr.dim().1);
             let snp_indices = snp_index_slices.slice(i * chunk_size..end_index);
             for (k, j) in snp_indices.to_iter().enumerate() {
@@ -950,9 +1013,9 @@ mod tests {
         }
 
         // test get_genotype_matrix
-        let geno = bed.get_genotype_matrix(
-            Some(snp_index_slices.clone()),
-        ).unwrap();
+        let geno = bed
+            .get_genotype_matrix(Some(snp_index_slices.clone()))
+            .unwrap();
         let mut arr = Array::zeros((num_people, 35));
         let mut jj = 0;
         for j in snp_index_slices.to_iter() {
@@ -983,7 +1046,13 @@ mod tests {
             for j in 0..num_cols {
                 assert!(
                     (arr1[[i, j]] - arr2[[i, j]]).abs() < eps,
-                    "arr1[{}, {}]: {} arr2[{}, {}]: {} ", i, j, arr1[[i, j]], i, j, arr2[[i, j]]
+                    "arr1[{}, {}]: {} arr2[{}, {}]: {} ",
+                    i,
+                    j,
+                    arr1[[i, j]],
+                    i,
+                    j,
+                    arr2[[i, j]]
                 );
             }
         }
@@ -993,36 +1062,39 @@ mod tests {
     fn test_create_dominance_geno_bed() {
         fn test(geno: &Array<u8, Ix2>) {
             let (bed_path, bim_path, fam_path) = create_temp_geno_bfile(geno);
-            let geno_bed = PlinkBed::new(
-                &vec![(bed_path.to_str().unwrap().to_string(),
-                       bim_path.to_str().unwrap().to_string(),
-                       fam_path.to_str().unwrap().to_string(),
-                       PlinkSnpType::Additive,
-                )]
-            ).unwrap();
+            let geno_bed = PlinkBed::new(&vec![(
+                bed_path.to_str().unwrap().to_string(),
+                bim_path.to_str().unwrap().to_string(),
+                fam_path.to_str().unwrap().to_string(),
+                PlinkSnpType::Additive,
+            )])
+            .unwrap();
             let dominance_path = NamedTempFile::new().unwrap().into_temp_path();
-            geno_bed.create_dominance_geno_bed(0, dominance_path.to_str().unwrap()).unwrap();
-            let dominance_geno = PlinkBed::new(
-                &vec![(dominance_path.to_str().unwrap().to_string(),
-                       bim_path.to_str().unwrap().to_string(),
-                       fam_path.to_str().unwrap().to_string(),
-                       PlinkSnpType::Additive,
-                )]
-            ).unwrap();
+            geno_bed
+                .create_dominance_geno_bed(0, dominance_path.to_str().unwrap())
+                .unwrap();
+            let dominance_geno = PlinkBed::new(&vec![(
+                dominance_path.to_str().unwrap().to_string(),
+                bim_path.to_str().unwrap().to_string(),
+                fam_path.to_str().unwrap().to_string(),
+                PlinkSnpType::Additive,
+            )])
+            .unwrap();
             assert_eq!(
-                geno_bed.get_genotype_matrix(None)
-                        .unwrap()
-                        .mapv(|s| match s as u8 {
-                            2 => 1u8,
-                            s => s,
-                        }),
-                dominance_geno.get_genotype_matrix(None)
-                              .unwrap()
-                              .mapv(|s| s as u8)
+                geno_bed
+                    .get_genotype_matrix(None)
+                    .unwrap()
+                    .mapv(|s| match s as u8 {
+                        2 => 1u8,
+                        s => s,
+                    }),
+                dominance_geno
+                    .get_genotype_matrix(None)
+                    .unwrap()
+                    .mapv(|s| s as u8)
             );
         }
-        test(
-            &array![
+        test(&array![
             [0, 0, 1, 2],
             [1, 1, 2, 1],
             [2, 0, 0, 0],
@@ -1030,8 +1102,7 @@ mod tests {
             [0, 2, 1, 0],
         ]);
 
-        test(
-            &array![
+        test(&array![
             [0, 0, 1, 2, 2],
             [1, 1, 2, 1, 0],
             [2, 0, 0, 0, 2],
@@ -1039,8 +1110,7 @@ mod tests {
             [0, 2, 1, 0, 1],
         ]);
 
-        test(
-            &array![
+        test(&array![
             [0, 0, 1, 2, 2],
             [1, 1, 2, 1, 0],
             [2, 0, 0, 0, 2],
@@ -1051,8 +1121,7 @@ mod tests {
             [2, 1, 0, 2, 0],
         ]);
 
-        test(
-            &array![
+        test(&array![
             [0, 0, 1, 2, 2, 1, 1, 0],
             [1, 1, 2, 1, 0, 0, 0, 0],
             [2, 0, 0, 0, 2, 1, 0, 1],
@@ -1063,8 +1132,7 @@ mod tests {
             [2, 1, 0, 2, 0, 0, 1, 1],
         ]);
 
-        test(
-            &array![
+        test(&array![
             [0, 0, 1, 2, 2, 1, 1, 0, 2],
             [1, 1, 2, 1, 0, 0, 0, 0, 1],
             [2, 0, 0, 0, 2, 1, 0, 1, 1],
@@ -1082,20 +1150,18 @@ mod tests {
             let (bed_path, bim_path, fam_path) = create_temp_geno_bfile(&standard_snp_arr);
 
             let eps = 1e-6;
-            let actual = convert_geno_arr_to_dominance_representation(standard_snp_arr.mapv(|x| x as f32));
+            let actual =
+                convert_geno_arr_to_dominance_representation(standard_snp_arr.mapv(|x| x as f32));
             assert_arr_almost_eq_f32(&actual, &expected, eps);
 
-            let geno_bed = PlinkBed::new(
-                &vec![
-                    (bed_path.to_str().unwrap().to_string(),
-                     bim_path.to_str().unwrap().to_string(),
-                     fam_path.to_str().unwrap().to_string(),
-                     PlinkSnpType::Dominance,
-                    )
-                ]
-            ).unwrap();
-            let dominance_snps = geno_bed.get_genotype_matrix(None)
-                                         .unwrap();
+            let geno_bed = PlinkBed::new(&vec![(
+                bed_path.to_str().unwrap().to_string(),
+                bim_path.to_str().unwrap().to_string(),
+                fam_path.to_str().unwrap().to_string(),
+                PlinkSnpType::Dominance,
+            )])
+            .unwrap();
+            let dominance_snps = geno_bed.get_genotype_matrix(None).unwrap();
             assert_arr_almost_eq_f32(&dominance_snps, &expected, eps)
         }
 
@@ -1108,11 +1174,11 @@ mod tests {
                 [0, 2, 2, 1, 1, 1],
             ],
             array![
-                [0.,   1.2,  0.8,  0.8,  0.4,  0.],
-                [-0.4, 0.4,  0.,   1.4,  0.4,  0.],
-                [0.8,  1.2,  0.8,  1.4,  0.,   0.],
-                [0.8,  0.,   1.4,  0.8,  1.2,  -0.8],
-                [0.,   0.4,  0.8,  1.4,  1.2,  0.6],
+                [0., 1.2, 0.8, 0.8, 0.4, 0.],
+                [-0.4, 0.4, 0., 1.4, 0.4, 0.],
+                [0.8, 1.2, 0.8, 1.4, 0., 0.],
+                [0.8, 0., 1.4, 0.8, 1.2, -0.8],
+                [0., 0.4, 0.8, 1.4, 1.2, 0.6],
             ],
         );
     }

@@ -59,7 +59,7 @@ impl Bed {
             };
             let interval_to_val = chrom_to_interval_to_val
                 .entry(chrom)
-                .or_insert(HashMap::new());
+                .or_insert_with(HashMap::new);
             interval_to_val.insert(ContiguousIntegerSet::new(start, end - 1), score);
         }
         Ok(chrom_to_interval_to_val)
@@ -123,7 +123,7 @@ impl<D: Float + FromStr<Err = E>, E: Debug> Iterator for BedDataLineIter<D> {
                 let mut toks = line.split_whitespace();
                 let chrom = {
                     let chrom = toks.next().unwrap();
-                    if chrom.starts_with("#") || chrom == "track" {
+                    if chrom.starts_with('#') || chrom == "track" {
                         continue;
                     }
                     chrom.to_string()
@@ -132,10 +132,8 @@ impl<D: Float + FromStr<Err = E>, E: Debug> Iterator for BedDataLineIter<D> {
                 let end = toks.next().unwrap().parse::<Coordinate>().unwrap();
 
                 // optional fields
-                let name = toks.next().and_then(|name| Some(name.to_string()));
-                let score = toks
-                    .next()
-                    .and_then(|score| Some(score.parse::<D>().unwrap()));
+                let name = toks.next().map(|name| name.to_string());
+                let score = toks.next().map(|score| score.parse::<D>().unwrap());
                 let strand = toks.next().and_then(|strand| {
                     Strand::new(strand).expect("failed to parse the strand symbol")
                 });

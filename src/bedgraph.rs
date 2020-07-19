@@ -41,7 +41,7 @@ impl BedGraph {
         for (chrom, start, end, val) in self.to_iter(): BedGraphDataLineIter<D> {
             let interval_to_val = chrom_to_interval_to_val
                 .entry(chrom)
-                .or_insert(HashMap::new());
+                .or_insert_with(HashMap::new);
             interval_to_val.insert(ContiguousIntegerSet::new(start, end - 1), val);
         }
         chrom_to_interval_to_val
@@ -98,7 +98,7 @@ impl<D: Float + FromStr<Err = E>, E: Debug> Iterator for BedGraphDataLineIter<D>
                 let mut toks = line.split_whitespace();
                 let chrom = {
                     let chrom = toks.next().unwrap();
-                    if chrom.starts_with("#") || chrom == "track" {
+                    if chrom.starts_with('#') || chrom == "track" {
                         continue;
                     }
                     chrom.to_string()
