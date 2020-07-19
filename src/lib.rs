@@ -1,6 +1,7 @@
 #![feature(bufreader_seek_relative)]
 #![feature(type_ascription)]
 
+pub mod bed;
 pub mod bedgraph;
 pub mod byte_chunk_iter;
 pub mod error;

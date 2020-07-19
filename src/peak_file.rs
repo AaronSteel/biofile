@@ -1,21 +1,27 @@
-use std::collections::HashMap;
-use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::{
+    collections::HashMap,
+    fs::File,
+    io::{BufRead, BufReader},
+};
 
-use analytic::partition::ordered_interval_partitions::OrderedIntervalPartitions;
-use analytic::set::ordered_integer_set::{ContiguousIntegerSet, OrderedIntegerSet};
+use analytic::{
+    partition::ordered_interval_partitions::OrderedIntervalPartitions,
+    set::ordered_integer_set::{ContiguousIntegerSet, OrderedIntegerSet},
+};
 
-use crate::error::Error;
-use crate::util::get_buf;
+use crate::{
+    error::Error,
+    util::{get_buf, Strand},
+};
 
 pub struct PeakFile {
-    filepath: String
+    filepath: String,
 }
 
 impl PeakFile {
     pub fn new(filepath: String) -> PeakFile {
         PeakFile {
-            filepath
+            filepath,
         }
     }
 
@@ -53,7 +59,7 @@ impl PeakFile {
             chrom_to_partitions.insert(
                 chrom,
                 OrderedIntervalPartitions::from_vec_with_trusted_order(
-                    OrderedIntegerSet::from_contiguous_integer_sets(intervals).into_intervals()
+                    OrderedIntegerSet::from_contiguous_integer_sets(intervals).into_intervals(),
                 ),
             );
         }
@@ -63,12 +69,6 @@ impl PeakFile {
     pub fn get_filepath(&self) -> &str {
         &self.filepath
     }
-}
-
-#[derive(PartialEq, Copy, Clone, Debug)]
-pub enum Strand {
-    Positive,
-    Negative,
 }
 
 /// The [start, end) is a zero-based left-closed right-open coordinate range
@@ -87,19 +87,20 @@ pub struct PeakFileDataLine {
 }
 
 pub struct PeakFileIter {
-    buf: BufReader<File>
+    buf: BufReader<File>,
 }
 
 impl PeakFileIter {
     pub fn new(buf: BufReader<File>) -> PeakFileIter {
         PeakFileIter {
-            buf
+            buf,
         }
     }
 }
 
 impl Iterator for PeakFileIter {
     type Item = PeakFileDataLine;
+
     fn next(&mut self) -> Option<Self::Item> {
         loop {
             let mut line = String::new();
@@ -145,18 +146,22 @@ impl Iterator for PeakFileIter {
                     q_value,
                     peak,
                 })
-            }
+            };
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-    use std::io::{BufWriter, Write};
+    use std::{
+        collections::HashMap,
+        io::{BufWriter, Write},
+    };
 
-    use analytic::partition::ordered_interval_partitions::OrderedIntervalPartitions;
-    use analytic::set::ordered_integer_set::ContiguousIntegerSet;
+    use analytic::{
+        partition::ordered_interval_partitions::OrderedIntervalPartitions,
+        set::ordered_integer_set::ContiguousIntegerSet,
+    };
     use tempfile::NamedTempFile;
 
     use crate::peak_file::{PeakFile, PeakFileDataLine};
@@ -250,41 +255,39 @@ mod tests {
         let expected: HashMap<String, OrderedIntervalPartitions<usize>> = vec![
             (
                 "chr1",
-                OrderedIntervalPartitions::from_vec_with_trusted_order(
-                    vec![
-                        ContiguousIntegerSet::new(1000usize, 1999),
-                        ContiguousIntegerSet::new(10050, 10499),
-                        ContiguousIntegerSet::new(28650, 28899)
-                    ]
-                )
+                OrderedIntervalPartitions::from_vec_with_trusted_order(vec![
+                    ContiguousIntegerSet::new(1000usize, 1999),
+                    ContiguousIntegerSet::new(10050, 10499),
+                    ContiguousIntegerSet::new(28650, 28899),
+                ]),
             ),
             (
                 "chr2",
-                OrderedIntervalPartitions::from_vec_with_trusted_order(
-                    vec![
-                        ContiguousIntegerSet::new(0usize, 2499),
-                        ContiguousIntegerSet::new(3000, 9999)
-                    ]
-                )
+                OrderedIntervalPartitions::from_vec_with_trusted_order(vec![
+                    ContiguousIntegerSet::new(0usize, 2499),
+                    ContiguousIntegerSet::new(3000, 9999),
+                ]),
             ),
             (
                 "chr3",
-                OrderedIntervalPartitions::from_vec_with_trusted_order(
-                    vec![ContiguousIntegerSet::new(0usize, 999)]
-                )
+                OrderedIntervalPartitions::from_vec_with_trusted_order(vec![
+                    ContiguousIntegerSet::new(0usize, 999),
+                ]),
             ),
             (
                 "chr4",
-                OrderedIntervalPartitions::from_vec_with_trusted_order(
-                    vec![
-                        ContiguousIntegerSet::new(10050usize, 10499),
-                        ContiguousIntegerSet::new(28650, 28899)
-                    ]
-                )
+                OrderedIntervalPartitions::from_vec_with_trusted_order(vec![
+                    ContiguousIntegerSet::new(10050usize, 10499),
+                    ContiguousIntegerSet::new(28650, 28899),
+                ]),
             ),
-        ].into_iter()
-         .map(|(c, p)| (c.to_string(), p))
-         .collect();
-        assert_eq!(expected, peak_file.get_chrom_to_peak_locations(None, None).unwrap());
+        ]
+        .into_iter()
+        .map(|(c, p)| (c.to_string(), p))
+        .collect();
+        assert_eq!(
+            expected,
+            peak_file.get_chrom_to_peak_locations(None, None).unwrap()
+        );
     }
 }
