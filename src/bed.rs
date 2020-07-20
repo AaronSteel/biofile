@@ -10,7 +10,7 @@ use std::{
     str::FromStr,
 };
 
-use analytic::{set::ordered_integer_set::ContiguousIntegerSet, traits::ToIterator};
+use analytic::{set::contiguous_integer_set::ContiguousIntegerSet, traits::ToIterator};
 use num::Float;
 
 use crate::{
@@ -157,7 +157,7 @@ mod tests {
         io::{BufWriter, Write},
     };
 
-    use analytic::set::ordered_integer_set::ContiguousIntegerSet;
+    use analytic::set::contiguous_integer_set::ContiguousIntegerSet;
     use tempfile::NamedTempFile;
 
     use crate::bed::{Bed, Coordinate};

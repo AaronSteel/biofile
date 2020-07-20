@@ -6,7 +6,7 @@ use std::{
 
 use analytic::{
     partition::ordered_interval_partitions::OrderedIntervalPartitions,
-    set::ordered_integer_set::{ContiguousIntegerSet, OrderedIntegerSet},
+    set::{contiguous_integer_set::ContiguousIntegerSet, ordered_integer_set::OrderedIntegerSet},
 };
 
 use crate::{
@@ -160,7 +160,7 @@ mod tests {
 
     use analytic::{
         partition::ordered_interval_partitions::OrderedIntervalPartitions,
-        set::ordered_integer_set::ContiguousIntegerSet,
+        set::contiguous_integer_set::ContiguousIntegerSet,
     };
     use tempfile::NamedTempFile;
 

@@ -20,6 +20,7 @@ pub const FIRST_ALLELE_FIELD_INDEX: usize = 4;
 pub const SECOND_ALLELE_FIELD_INDEX: usize = 5;
 
 pub type PartitionKey = String;
+pub type Coordinate = i64;
 
 pub struct PlinkBim {
     bim_path_list: Vec<String>,
@@ -37,7 +38,7 @@ impl PlinkBim {
 
     pub fn new_with_partitions(
         bim_path_list: Vec<String>,
-        partitions: HashMap<PartitionKey, OrderedIntegerSet<usize>>,
+        partitions: HashMap<PartitionKey, OrderedIntegerSet<Coordinate>>,
     ) -> Result<PlinkBim, Error> {
         let mut bim = PlinkBim::new(bim_path_list)?;
         bim.set_fileline_partitions(Some(FilelinePartitions::new(partitions)));
@@ -78,7 +79,7 @@ impl PlinkBim {
 
     pub fn get_chrom_to_fileline_positions(
         &mut self,
-    ) -> Result<HashMap<PartitionKey, OrderedIntegerSet<usize>>, Error> {
+    ) -> Result<HashMap<PartitionKey, OrderedIntegerSet<Coordinate>>, Error> {
         Ok(self
             .get_all_chroms()?
             .into_iter()
@@ -86,7 +87,7 @@ impl PlinkBim {
                 let partition = self.get_chrom_fileline_positions(&chrom)?;
                 Ok((chrom, partition))
             })
-            .collect::<Result<HashMap<PartitionKey, OrderedIntegerSet<usize>>, Error>>()?)
+            .collect::<Result<HashMap<PartitionKey, OrderedIntegerSet<Coordinate>>, Error>>()?)
     }
 
     pub fn get_fileline_partitions(&self) -> Option<FilelinePartitions> {
@@ -106,7 +107,7 @@ impl PlinkBim {
     pub fn get_fileline_partitions_or(
         &self,
         default_partition_name: &str,
-        default_partition_range: OrderedIntegerSet<usize>,
+        default_partition_range: OrderedIntegerSet<Coordinate>,
     ) -> FilelinePartitions {
         match &self.fileline_partitions {
             None => FilelinePartitions::new(HashMap::from_iter(
@@ -128,7 +129,7 @@ impl PlinkBim {
                 .map(|line| PlinkBim::get_id_and_partition_from_line(&line?))
                 .collect::<Result<HashMap<String, PartitionKey>, Error>>()?;
 
-        let mut partitions: HashMap<PartitionKey, OrderedIntegerSet<usize>> = HashMap::new();
+        let mut partitions: HashMap<PartitionKey, OrderedIntegerSet<Coordinate>> = HashMap::new();
         let mut visited_ids = HashSet::new();
         let mut num_ignored_ids = 0;
 
@@ -136,7 +137,7 @@ impl PlinkBim {
         for (b, buf) in self.get_buf_list()?.into_iter().enumerate() {
             let mut last_line_index = 0;
             for (i, line) in buf.lines().enumerate() {
-                last_line_index = i;
+                last_line_index = i as Coordinate;
                 let id = match line?.split_whitespace().nth(VARIANT_ID_FIELD_INDEX) {
                     None => {
                         return Err(Error::BadFormat(format!(
@@ -157,7 +158,7 @@ impl PlinkBim {
                     Some(key) => partitions
                         .entry(key.to_owned())
                         .or_insert(OrderedIntegerSet::new())
-                        .collect(file_line_offset + i),
+                        .collect(file_line_offset + i as Coordinate),
                 }
             }
             file_line_offset += last_line_index + 1;
@@ -233,13 +234,13 @@ impl PlinkBim {
     pub fn get_chrom_fileline_positions(
         &mut self,
         chrom: &str,
-    ) -> Result<OrderedIntegerSet<usize>, Error> {
+    ) -> Result<OrderedIntegerSet<Coordinate>, Error> {
         let mut set = OrderedIntegerSet::new();
-        let mut file_line_offfset = 0;
+        let mut file_line_offset = 0;
         for (b, buf) in self.get_buf_list()?.into_iter().enumerate() {
             let mut last_line_index = 0;
             for (i, line) in buf.lines().enumerate() {
-                last_line_index = i;
+                last_line_index = i as Coordinate;
                 if line?
                     .split_whitespace()
                     .nth(CHROM_FIELD_INDEX)
@@ -252,10 +253,10 @@ impl PlinkBim {
                     })?
                     == chrom
                 {
-                    set.collect(file_line_offfset + i);
+                    set.collect(file_line_offset + i as Coordinate);
                 }
             }
-            file_line_offfset += last_line_index + 1;
+            file_line_offset += last_line_index + 1;
         }
         Ok(set)
     }
@@ -314,12 +315,12 @@ impl FilelinePartitions {
 }
 
 pub struct FilelinePartitionsIter<'a> {
-    partitions: &'a HashMap<String, OrderedIntegerSet<usize>>,
+    partitions: &'a HashMap<String, OrderedIntegerSet<Coordinate>>,
     key_iter: Iter<'a, String>,
 }
 
 impl<'a> Iterator for FilelinePartitionsIter<'a> {
-    type Item = (&'a str, &'a OrderedIntegerSet<usize>);
+    type Item = (&'a str, &'a OrderedIntegerSet<Coordinate>);
 
     fn next(&mut self) -> Option<Self::Item> {
         match self.key_iter.next() {
@@ -331,16 +332,16 @@ impl<'a> Iterator for FilelinePartitionsIter<'a> {
 
 #[cfg(test)]
 mod tests {
+    use crate::plink_bim::{Coordinate, PlinkBim};
+    use analytic::set::{
+        contiguous_integer_set::ContiguousIntegerSet, ordered_integer_set::OrderedIntegerSet,
+    };
     use std::{
         collections::{HashMap, HashSet},
         fs::OpenOptions,
         io::{BufWriter, Write},
     };
-
-    use analytic::set::ordered_integer_set::{ContiguousIntegerSet, OrderedIntegerSet};
     use tempfile::NamedTempFile;
-
-    use super::PlinkBim;
 
     #[inline]
     fn write_bim_line<W: Write>(
@@ -407,7 +408,7 @@ mod tests {
         ])
         .unwrap();
         let positions = bim.get_chrom_to_fileline_positions().unwrap();
-        let expected: HashMap<String, OrderedIntegerSet<usize>> = vec![
+        let expected: HashMap<String, OrderedIntegerSet<Coordinate>> = vec![
             (
                 "1".to_string(),
                 OrderedIntegerSet::from(vec![
