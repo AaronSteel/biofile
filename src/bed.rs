@@ -10,7 +10,10 @@ use std::{
     str::FromStr,
 };
 
-use analytic::{set::contiguous_integer_set::ContiguousIntegerSet, traits::ToIterator};
+use analytic::{
+    partition::integer_interval_map::IntegerIntervalMap,
+    set::contiguous_integer_set::ContiguousIntegerSet, traits::ToIterator,
+};
 use num::Float;
 
 use crate::{
@@ -36,11 +39,11 @@ impl Bed {
 
     pub fn get_chrom_to_interval_to_val<D, E>(
         &self,
-    ) -> Result<HashMap<String, HashMap<ContiguousIntegerSet<Coordinate>, D>>, Error>
+    ) -> Result<HashMap<String, IntegerIntervalMap<D>>, Error>
     where
         D: Float + FromStr<Err = E>,
         E: Debug, {
-        let mut chrom_to_interval_to_val = HashMap::new();
+        let mut chrom_to_interval_map = HashMap::new();
         for BedDataLine {
             chrom,
             start,
@@ -57,12 +60,12 @@ impl Bed {
                     "the BED file does not have a score field".into(),
                 ));
             };
-            let interval_to_val = chrom_to_interval_to_val
+            let interval_map = chrom_to_interval_map
                 .entry(chrom)
-                .or_insert_with(HashMap::new);
-            interval_to_val.insert(ContiguousIntegerSet::new(start, end - 1), score);
+                .or_insert_with(IntegerIntervalMap::new);
+            interval_map.aggregate(ContiguousIntegerSet::new(start, end - 1), score);
         }
-        Ok(chrom_to_interval_to_val)
+        Ok(chrom_to_interval_map)
     }
 }
 
@@ -152,15 +155,13 @@ impl<D: Float + FromStr<Err = E>, E: Debug> Iterator for BedDataLineIter<D> {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        collections::HashMap,
-        io::{BufWriter, Write},
+    use crate::bed::Bed;
+    use analytic::{
+        partition::integer_interval_map::IntegerIntervalMap,
+        set::contiguous_integer_set::ContiguousIntegerSet,
     };
-
-    use analytic::set::contiguous_integer_set::ContiguousIntegerSet;
+    use std::io::{BufWriter, Write};
     use tempfile::NamedTempFile;
-
-    use crate::bed::{Bed, Coordinate};
 
     #[test]
     fn test_get_chrom_to_interval_to_val() {
@@ -170,27 +171,26 @@ mod tests {
             writer
                 .write_fmt(format_args!(
                     "chr1 100 200 name_1 3.5\n\
-                    chr1 200 350 name_2 4.0\n\
-                    chr3 1000 3000 name_3 -0.3\n\
-                    chr1 400 450 name_4 -0.9\n"
+                    chr1 150 250 name_2 2\n\
+                    chr1 200 350 name_3 4.0\n\
+                    chr3 1000 3000 name_4 -0.3\n\
+                    chr1 400 450 name_5 -0.9\n\
+                    chr3 2500 3000 name_6 0.3\n"
                 ))
                 .unwrap();
         }
         let bed = Bed::new(file.path().to_str().unwrap()).unwrap();
         let chrom_to_interval_to_val = bed.get_chrom_to_interval_to_val().unwrap();
-        let expected_chr1: HashMap<ContiguousIntegerSet<Coordinate>, f64> = [
-            (ContiguousIntegerSet::new(100, 199), 3.5),
-            (ContiguousIntegerSet::new(200, 349), 4.),
-            (ContiguousIntegerSet::new(400, 449), -0.9),
-        ]
-        .iter()
-        .map(|(a, b)| (*a, *b))
-        .collect();
-        let expected_chr3: HashMap<ContiguousIntegerSet<Coordinate>, f64> =
-            [(ContiguousIntegerSet::new(1000, 2999), -0.3)]
-                .iter()
-                .map(|(a, b)| (*a, *b))
-                .collect();
+        let mut expected_chr1 = IntegerIntervalMap::<f64>::new();
+        expected_chr1.aggregate(ContiguousIntegerSet::new(100, 149), 3.5);
+        expected_chr1.aggregate(ContiguousIntegerSet::new(150, 199), 5.5);
+        expected_chr1.aggregate(ContiguousIntegerSet::new(200, 249), 6.);
+        expected_chr1.aggregate(ContiguousIntegerSet::new(250, 349), 4.);
+        expected_chr1.aggregate(ContiguousIntegerSet::new(400, 449), -0.9);
+
+        let mut expected_chr3 = IntegerIntervalMap::<f64>::new();
+        expected_chr3.aggregate(ContiguousIntegerSet::new(1000, 2499), -0.3);
+        expected_chr3.aggregate(ContiguousIntegerSet::new(2500, 2999), 0.);
         assert_eq!(chrom_to_interval_to_val["chr1"], expected_chr1);
         assert_eq!(chrom_to_interval_to_val["chr3"], expected_chr3);
     }
