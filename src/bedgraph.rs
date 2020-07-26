@@ -1,7 +1,7 @@
 //! An interface to the BedGraph track format file as specified in
 //! https://genome.ucsc.edu/goldenPath/help/bedgraph.html
 
-use analytic::{
+use math::{
     partition::integer_interval_map::IntegerIntervalMap,
     set::contiguous_integer_set::ContiguousIntegerSet, traits::ToIterator,
 };
@@ -115,7 +115,7 @@ impl<D: Float + FromStr<Err = E>, E: Debug> Iterator for BedGraphDataLineIter<D>
 #[cfg(test)]
 mod tests {
     use crate::bedgraph::BedGraph;
-    use analytic::{
+    use math::{
         partition::integer_interval_map::IntegerIntervalMap,
         set::contiguous_integer_set::ContiguousIntegerSet,
     };

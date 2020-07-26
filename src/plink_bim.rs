@@ -6,7 +6,7 @@ use std::{
     slice::Iter,
 };
 
-use analytic::{
+use math::{
     partition::integer_partitions::Partition, set::ordered_integer_set::OrderedIntegerSet,
     traits::Collecting,
 };
@@ -333,7 +333,7 @@ impl<'a> Iterator for FilelinePartitionsIter<'a> {
 #[cfg(test)]
 mod tests {
     use crate::plink_bim::{Coordinate, PlinkBim};
-    use analytic::set::{
+    use math::set::{
         contiguous_integer_set::ContiguousIntegerSet, ordered_integer_set::OrderedIntegerSet,
     };
     use std::{

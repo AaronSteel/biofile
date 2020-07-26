@@ -10,7 +10,7 @@ use std::{
     str::FromStr,
 };
 
-use analytic::{
+use math::{
     partition::integer_interval_map::IntegerIntervalMap,
     set::contiguous_integer_set::ContiguousIntegerSet, traits::ToIterator,
 };
@@ -156,7 +156,7 @@ impl<D: Float + FromStr<Err = E>, E: Debug> Iterator for BedDataLineIter<D> {
 #[cfg(test)]
 mod tests {
     use crate::bed::Bed;
-    use analytic::{
+    use math::{
         partition::integer_interval_map::IntegerIntervalMap,
         set::contiguous_integer_set::ContiguousIntegerSet,
     };

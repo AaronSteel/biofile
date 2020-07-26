@@ -1,4 +1,4 @@
-use analytic::traits::ToIterator;
+use math::traits::ToIterator;
 
 use crate::plink_bed::{
     geno_to_lowest_two_bits, get_num_people_last_byte, lowest_two_bits_to_geno,
@@ -109,7 +109,7 @@ impl Iterator for PlinkSnpsIter {
 
 #[cfg(test)]
 mod tests {
-    use analytic::traits::ToIterator;
+    use math::traits::ToIterator;
 
     use super::PlinkSnps;
 

@@ -4,7 +4,7 @@ use std::{
     io::{BufRead, BufReader},
 };
 
-use analytic::{
+use math::{
     partition::ordered_interval_partitions::OrderedIntervalPartitions,
     set::{contiguous_integer_set::ContiguousIntegerSet, ordered_integer_set::OrderedIntegerSet},
 };
@@ -158,7 +158,7 @@ mod tests {
         io::{BufWriter, Write},
     };
 
-    use analytic::{
+    use math::{
         partition::ordered_interval_partitions::OrderedIntervalPartitions,
         set::contiguous_integer_set::ContiguousIntegerSet,
     };

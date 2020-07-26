@@ -6,7 +6,7 @@ use std::{
     io::{BufRead, BufReader, BufWriter, Read, Seek, SeekFrom, Write},
 };
 
-use analytic::{
+use math::{
     set::{
         ordered_integer_set::OrderedIntegerSet,
         traits::{Finite, Set},
@@ -528,7 +528,7 @@ impl PlinkColChunkIter {
     }
 
     fn seek_to_snp(&mut self, snp_index: usize) -> Result<(), Error> {
-        if !self.range.contains(snp_index) {
+        if !self.range.contains(&snp_index) {
             return Err(Error::Generic(format!(
                 "SNP index {} is not in the iterator range",
                 snp_index
@@ -835,7 +835,7 @@ impl IndexedParallelIterator for PlinkColChunkParallelIter {
 mod tests {
     use std::{cmp::min, io, io::Write};
 
-    use analytic::{set::ordered_integer_set::OrderedIntegerSet, traits::ToIterator};
+    use math::{set::ordered_integer_set::OrderedIntegerSet, traits::ToIterator};
     use ndarray::{array, s, stack, Array, Axis, Ix2};
     use ndarray_rand::RandomExt;
     use rand::distributions::Uniform;
