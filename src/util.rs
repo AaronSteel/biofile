@@ -27,7 +27,10 @@ impl Strand {
             "+" => Ok(Some(Strand::Positive)),
             "-" => Ok(Some(Strand::Negative)),
             "." => Ok(None),
-            s => Err(Error::BadFormat(format!("unrecognized strand symbol: {}", s))),
+            s => Err(Error::BadFormat(format!(
+                "unrecognized strand symbol: {}",
+                s
+            ))),
         }
     }
 }

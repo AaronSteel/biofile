@@ -26,10 +26,10 @@ pub struct Bed {
 }
 
 impl Bed {
-    pub fn new(filepath: &str) -> Result<Bed, Error> {
-        Ok(Bed {
+    pub fn new(filepath: &str) -> Bed {
+        Bed {
             filepath: filepath.to_string(),
-        })
+        }
     }
 
     #[inline]
@@ -179,7 +179,7 @@ mod tests {
                 ))
                 .unwrap();
         }
-        let bed = Bed::new(file.path().to_str().unwrap()).unwrap();
+        let bed = Bed::new(file.path().to_str().unwrap());
         let chrom_to_interval_to_val = bed.get_chrom_to_interval_to_val().unwrap();
         let mut expected_chr1 = IntegerIntervalMap::<f64>::new();
         expected_chr1.aggregate(ContiguousIntegerSet::new(100, 149), 3.5);

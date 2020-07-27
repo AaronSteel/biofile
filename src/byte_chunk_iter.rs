@@ -1,6 +1,8 @@
-use std::io;
-use std::cmp::min;
-use std::io::{BufReader, Read, Seek, SeekFrom};
+use std::{
+    cmp::min,
+    io,
+    io::{BufReader, Read, Seek, SeekFrom},
+};
 
 pub struct ByteChunkIter<R> {
     pub start_byte_index: usize,
@@ -15,7 +17,7 @@ impl<R: Seek> ByteChunkIter<R> {
         mut buf: BufReader<R>,
         start_byte_index: usize,
         end_byte_index_exclusive: usize,
-        chunk_size: usize
+        chunk_size: usize,
     ) -> ByteChunkIter<R> {
         let offset = buf.seek(SeekFrom::Start(start_byte_index as u64)).unwrap() as usize;
         assert_eq!(offset, start_byte_index);
@@ -44,7 +46,10 @@ impl<R: Read> Iterator for ByteChunkIter<R> {
         if self.current_byte_index >= self.end_byte_index_exclusive {
             None
         } else {
-            let len = min(self.end_byte_index_exclusive - self.current_byte_index, self.chunk_size);
+            let len = min(
+                self.end_byte_index_exclusive - self.current_byte_index,
+                self.chunk_size,
+            );
             let mut bytes = vec![0u8; len];
             self.buf.read_exact(bytes.as_mut_slice()).unwrap();
             self.current_byte_index += len;

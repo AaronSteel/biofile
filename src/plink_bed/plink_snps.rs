@@ -1,8 +1,7 @@
 use math::traits::ToIterator;
 
 use crate::plink_bed::{
-    geno_to_lowest_two_bits, get_num_people_last_byte, lowest_two_bits_to_geno,
-    usize_div_ceil,
+    geno_to_lowest_two_bits, get_num_people_last_byte, lowest_two_bits_to_geno, usize_div_ceil,
 };
 
 pub struct PlinkSnps {
@@ -12,8 +11,14 @@ pub struct PlinkSnps {
 
 impl PlinkSnps {
     pub fn new(bytes: Vec<u8>, num_snps: usize) -> PlinkSnps {
-        assert!(num_snps <= bytes.len() * 4,
-                format!("num_snps ({}) > bytes.len() * 4 = {}", num_snps, bytes.len() * 4));
+        assert!(
+            num_snps <= bytes.len() * 4,
+            format!(
+                "num_snps ({}) > bytes.len() * 4 = {}",
+                num_snps,
+                bytes.len() * 4
+            )
+        );
         PlinkSnps {
             bytes,
             num_snps,
@@ -30,7 +35,7 @@ impl PlinkSnps {
                     geno_to_lowest_two_bits(geno[snp_index])
                         | (geno_to_lowest_two_bits(geno[snp_index + 1]) << 2)
                         | (geno_to_lowest_two_bits(geno[snp_index + 2]) << 4)
-                        | (geno_to_lowest_two_bits(geno[snp_index + 3]) << 6)
+                        | (geno_to_lowest_two_bits(geno[snp_index + 3]) << 6),
                 );
                 snp_index += 4;
             }
@@ -72,8 +77,9 @@ impl ToIterator<'_, PlinkSnpsIter, u8> for PlinkSnps {
 }
 
 impl IntoIterator for PlinkSnps {
-    type Item = <PlinkSnpsIter as Iterator>::Item;
     type IntoIter = PlinkSnpsIter;
+    type Item = <PlinkSnpsIter as Iterator>::Item;
+
     fn into_iter(self) -> Self::IntoIter {
         PlinkSnpsIter {
             bytes: self.bytes,
@@ -93,11 +99,14 @@ pub struct PlinkSnpsIter {
 
 impl Iterator for PlinkSnpsIter {
     type Item = u8;
+
     fn next(&mut self) -> Option<Self::Item> {
         if self.cursor >= self.num_snps {
             None
         } else {
-            let snp = lowest_two_bits_to_geno(self.bytes[self.byte_cursor] >> (2 * (self.cursor % 4) as u8));
+            let snp = lowest_two_bits_to_geno(
+                self.bytes[self.byte_cursor] >> (2 * (self.cursor % 4) as u8),
+            );
             self.cursor += 1;
             if self.cursor % 4 == 0 {
                 self.byte_cursor += 1;
