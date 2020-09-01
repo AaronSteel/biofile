@@ -43,7 +43,7 @@ impl Bed {
     /// intersection with any of the intervals in `exclude`.
     pub fn get_chrom_to_interval_to_val<D, E>(
         &self,
-        exclude: Option<HashMap<Chrom, OrderedIntegerSet<Coordinate>>>,
+        exclude: Option<&HashMap<Chrom, OrderedIntegerSet<Coordinate>>>,
     ) -> Result<HashMap<String, IntegerIntervalMap<D>>, Error>
     where
         D: Float + FromStr<Err = E>,
@@ -67,7 +67,7 @@ impl Bed {
             };
 
             let interval = ContiguousIntegerSet::new(start, end - 1);
-            if let Some(chrom_to_excluded_intervals) = &exclude {
+            if let Some(chrom_to_excluded_intervals) = exclude {
                 if let Some(excluded_intervals) = chrom_to_excluded_intervals.get(&chrom) {
                     if interval.has_non_empty_intersection_with(excluded_intervals) {
                         continue;
@@ -269,18 +269,21 @@ mod tests {
         let bed = Bed::new(file.path().to_str().unwrap());
         {
             let chrom_to_interval_to_val = bed.get_chrom_to_interval_to_val(None).unwrap();
-            let mut expected_chr1 = IntegerIntervalMap::<f64>::new();
-            expected_chr1.aggregate(ContiguousIntegerSet::new(100, 149), 3.5);
-            expected_chr1.aggregate(ContiguousIntegerSet::new(150, 199), 5.5);
-            expected_chr1.aggregate(ContiguousIntegerSet::new(200, 249), 6.);
-            expected_chr1.aggregate(ContiguousIntegerSet::new(250, 349), 4.);
-            expected_chr1.aggregate(ContiguousIntegerSet::new(400, 449), -0.9);
-
-            let mut expected_chr3 = IntegerIntervalMap::<f64>::new();
-            expected_chr3.aggregate(ContiguousIntegerSet::new(1000, 2499), -0.3);
-            expected_chr3.aggregate(ContiguousIntegerSet::new(2500, 2999), 0.);
-            assert_eq!(chrom_to_interval_to_val["chr1"], expected_chr1);
-            assert_eq!(chrom_to_interval_to_val["chr3"], expected_chr3);
+            {
+                let mut expected_chr1 = IntegerIntervalMap::<f64>::new();
+                expected_chr1.aggregate(ContiguousIntegerSet::new(100, 149), 3.5);
+                expected_chr1.aggregate(ContiguousIntegerSet::new(150, 199), 5.5);
+                expected_chr1.aggregate(ContiguousIntegerSet::new(200, 249), 6.);
+                expected_chr1.aggregate(ContiguousIntegerSet::new(250, 349), 4.);
+                expected_chr1.aggregate(ContiguousIntegerSet::new(400, 449), -0.9);
+                assert_eq!(chrom_to_interval_to_val["chr1"], expected_chr1);
+            }
+            {
+                let mut expected_chr3 = IntegerIntervalMap::<f64>::new();
+                expected_chr3.aggregate(ContiguousIntegerSet::new(1000, 2499), -0.3);
+                expected_chr3.aggregate(ContiguousIntegerSet::new(2500, 2999), 0.);
+                assert_eq!(chrom_to_interval_to_val["chr3"], expected_chr3);
+            }
         }
 
         {
@@ -298,14 +301,21 @@ mod tests {
             .cloned()
             .collect();
 
-            let chrom_to_interval_to_val = bed.get_chrom_to_interval_to_val(Some(exclude)).unwrap();
-            let mut expected_chr1 = IntegerIntervalMap::<f64>::new();
-            expected_chr1.aggregate(ContiguousIntegerSet::new(400, 449), -0.9);
-            assert_eq!(chrom_to_interval_to_val["chr1"], expected_chr1);
+            let chrom_to_interval_to_val = bed
+                .get_chrom_to_interval_to_val(Some(exclude).as_ref())
+                .unwrap();
 
-            let mut expected_chr3 = IntegerIntervalMap::<f64>::new();
-            expected_chr3.aggregate(ContiguousIntegerSet::new(2500, 2999), 0.3);
-            assert_eq!(chrom_to_interval_to_val["chr3"], expected_chr3);
+            {
+                let mut expected_chr1 = IntegerIntervalMap::<f64>::new();
+                expected_chr1.aggregate(ContiguousIntegerSet::new(400, 449), -0.9);
+                assert_eq!(chrom_to_interval_to_val["chr1"], expected_chr1);
+            }
+
+            {
+                let mut expected_chr3 = IntegerIntervalMap::<f64>::new();
+                expected_chr3.aggregate(ContiguousIntegerSet::new(2500, 2999), 0.3);
+                assert_eq!(chrom_to_interval_to_val["chr3"], expected_chr3);
+            }
         }
     }
 
