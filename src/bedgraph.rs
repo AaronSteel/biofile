@@ -33,23 +33,31 @@ impl BedGraph {
         &self.filepath
     }
 
-    pub fn get_chrom_to_interval_to_val<D, E>(&self) -> HashMap<String, IntegerIntervalMap<D>>
+    pub fn get_chrom_to_interval_to_val<D, E>(
+        &self,
+    ) -> HashMap<String, IntegerIntervalMap<D>>
     where
         D: Float + FromStr<Err = E>,
         E: Debug, {
         let mut chrom_to_interval_to_val = HashMap::new();
-        for (chrom, start, end, val) in self.to_iter(): BedGraphDataLineIter<D> {
+        for (chrom, start, end, val) in self.to_iter(): BedGraphDataLineIter<D>
+        {
             let interval_to_val = chrom_to_interval_to_val
                 .entry(chrom)
                 .or_insert_with(IntegerIntervalMap::new);
-            interval_to_val.aggregate(ContiguousIntegerSet::new(start, end - 1), val);
+            interval_to_val
+                .aggregate(ContiguousIntegerSet::new(start, end - 1), val);
         }
         chrom_to_interval_to_val
     }
 }
 
-impl<D, E> ToIterator<'_, BedGraphDataLineIter<D>, <BedGraphDataLineIter<D> as Iterator>::Item>
-    for BedGraph
+impl<D, E>
+    ToIterator<
+        '_,
+        BedGraphDataLineIter<D>,
+        <BedGraphDataLineIter<D> as Iterator>::Item,
+    > for BedGraph
 where
     D: Float + FromStr<Err = E>,
     E: Debug,
@@ -67,8 +75,8 @@ where
 /// Data type of the Bedgraph coordinates
 pub type Coordinate = i64;
 
-/// The four-element tuple in the `BedGraphDataLine` corresponds to a line of data in the BedGraph
-/// file, where each line is of the form
+/// The four-element tuple in the `BedGraphDataLine` corresponds to a line of
+/// data in the BedGraph file, where each line is of the form
 /// `chrom start end value`
 ///
 /// The [start, end) is a zero-based left-closed right-open coordinate range
@@ -86,7 +94,9 @@ impl<D> BedGraphDataLineIter<D> {
     }
 }
 
-impl<D: Float + FromStr<Err = E>, E: Debug> Iterator for BedGraphDataLineIter<D> {
+impl<D: Float + FromStr<Err = E>, E: Debug> Iterator
+    for BedGraphDataLineIter<D>
+{
     type Item = BedGraphDataLine<D>;
 
     fn next(&mut self) -> Option<Self::Item> {

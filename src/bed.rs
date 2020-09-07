@@ -8,8 +8,8 @@ use crate::{
 use math::{
     partition::integer_interval_map::IntegerIntervalMap,
     set::{
-        contiguous_integer_set::ContiguousIntegerSet, ordered_integer_set::OrderedIntegerSet,
-        traits::Intersect,
+        contiguous_integer_set::ContiguousIntegerSet,
+        ordered_integer_set::OrderedIntegerSet, traits::Intersect,
     },
     traits::ToIterator,
 };
@@ -22,6 +22,8 @@ use std::{
     marker::PhantomData,
     str::FromStr,
 };
+
+pub mod bed_writer;
 
 pub struct Bed {
     filepath: String,
@@ -39,8 +41,8 @@ impl Bed {
         &self.filepath
     }
 
-    /// Will discard the lines in the bed file if the corresponding range has a non-empty
-    /// intersection with any of the intervals in `exclude`.
+    /// Will discard the lines in the bed file if the corresponding range has a
+    /// non-empty intersection with any of the intervals in `exclude`.
     pub fn get_chrom_to_interval_to_val<D, E>(
         &self,
         exclude: Option<&HashMap<Chrom, OrderedIntegerSet<Coordinate>>>,
@@ -68,8 +70,12 @@ impl Bed {
 
             let interval = ContiguousIntegerSet::new(start, end - 1);
             if let Some(chrom_to_excluded_intervals) = exclude {
-                if let Some(excluded_intervals) = chrom_to_excluded_intervals.get(&chrom) {
-                    if interval.has_non_empty_intersection_with(excluded_intervals) {
+                if let Some(excluded_intervals) =
+                    chrom_to_excluded_intervals.get(&chrom)
+                {
+                    if interval
+                        .has_non_empty_intersection_with(excluded_intervals)
+                    {
                         continue;
                     }
                 }
@@ -84,22 +90,26 @@ impl Bed {
         Ok(chrom_to_interval_map)
     }
 
-    pub fn get_chrom_to_intervals(&self) -> HashMap<Chrom, OrderedIntegerSet<Coordinate>> {
+    pub fn get_chrom_to_intervals(
+        &self,
+    ) -> HashMap<Chrom, OrderedIntegerSet<Coordinate>> {
         let mut chrom_to_interval_map = HashMap::new();
         for (chrom, start, end) in self.to_coord_iter() {
             let interval_map = chrom_to_interval_map
                 .entry(chrom)
                 .or_insert_with(IntegerIntervalMap::new);
-            interval_map.aggregate(ContiguousIntegerSet::new(start, end - 1), 1);
+            interval_map
+                .aggregate(ContiguousIntegerSet::new(start, end - 1), 1);
         }
         chrom_to_interval_map
             .into_iter()
             .map(|(chrom, interval_map)| {
-                let intervals: Vec<ContiguousIntegerSet<Coordinate>> = interval_map
-                    .into_map()
-                    .into_iter()
-                    .map(|(k, _)| k)
-                    .collect();
+                let intervals: Vec<ContiguousIntegerSet<Coordinate>> =
+                    interval_map
+                        .into_map()
+                        .into_iter()
+                        .map(|(k, _)| k)
+                        .collect();
                 (chrom, OrderedIntegerSet::from(intervals))
             })
             .collect()
@@ -113,7 +123,9 @@ impl Bed {
     }
 }
 
-impl<D, E> ToIterator<'_, BedDataLineIter<D>, <BedDataLineIter<D> as Iterator>::Item> for Bed
+impl<D, E>
+    ToIterator<'_, BedDataLineIter<D>, <BedDataLineIter<D> as Iterator>::Item>
+    for Bed
 where
     D: Float + FromStr<Err = E>,
     E: Debug,
@@ -136,7 +148,8 @@ pub type Chrom = String;
 /// `BedDataLine` corresponds to a line of data in the Bed
 /// file, where each line is of the form
 /// `chrom start end name score strand ...`,
-/// where the first three fields are required, and the remaining 9 fields are optional.
+/// where the first three fields are required, and the remaining 9 fields are
+/// optional.
 ///
 /// The [start, end) is a zero-based left-closed right-open coordinate range.
 pub struct BedDataLine<D> {
@@ -182,9 +195,11 @@ impl<D: Float + FromStr<Err = E>, E: Debug> Iterator for BedDataLineIter<D> {
 
                 // optional fields
                 let name = toks.next().map(|name| name.to_string());
-                let score = toks.next().map(|score| score.parse::<D>().unwrap());
+                let score =
+                    toks.next().map(|score| score.parse::<D>().unwrap());
                 let strand = toks.next().and_then(|strand| {
-                    Strand::new(strand).expect("failed to parse the strand symbol")
+                    Strand::new(strand)
+                        .expect("failed to parse the strand symbol")
                 });
                 Some(BedDataLine {
                     chrom,
@@ -241,7 +256,8 @@ mod tests {
     use math::{
         partition::integer_interval_map::IntegerIntervalMap,
         set::{
-            contiguous_integer_set::ContiguousIntegerSet, ordered_integer_set::OrderedIntegerSet,
+            contiguous_integer_set::ContiguousIntegerSet,
+            ordered_integer_set::OrderedIntegerSet,
         },
     };
     use std::{
@@ -268,20 +284,28 @@ mod tests {
         }
         let bed = Bed::new(file.path().to_str().unwrap());
         {
-            let chrom_to_interval_to_val = bed.get_chrom_to_interval_to_val(None).unwrap();
+            let chrom_to_interval_to_val =
+                bed.get_chrom_to_interval_to_val(None).unwrap();
             {
                 let mut expected_chr1 = IntegerIntervalMap::<f64>::new();
-                expected_chr1.aggregate(ContiguousIntegerSet::new(100, 149), 3.5);
-                expected_chr1.aggregate(ContiguousIntegerSet::new(150, 199), 5.5);
-                expected_chr1.aggregate(ContiguousIntegerSet::new(200, 249), 6.);
-                expected_chr1.aggregate(ContiguousIntegerSet::new(250, 349), 4.);
-                expected_chr1.aggregate(ContiguousIntegerSet::new(400, 449), -0.9);
+                expected_chr1
+                    .aggregate(ContiguousIntegerSet::new(100, 149), 3.5);
+                expected_chr1
+                    .aggregate(ContiguousIntegerSet::new(150, 199), 5.5);
+                expected_chr1
+                    .aggregate(ContiguousIntegerSet::new(200, 249), 6.);
+                expected_chr1
+                    .aggregate(ContiguousIntegerSet::new(250, 349), 4.);
+                expected_chr1
+                    .aggregate(ContiguousIntegerSet::new(400, 449), -0.9);
                 assert_eq!(chrom_to_interval_to_val["chr1"], expected_chr1);
             }
             {
                 let mut expected_chr3 = IntegerIntervalMap::<f64>::new();
-                expected_chr3.aggregate(ContiguousIntegerSet::new(1000, 2499), -0.3);
-                expected_chr3.aggregate(ContiguousIntegerSet::new(2500, 2999), 0.);
+                expected_chr3
+                    .aggregate(ContiguousIntegerSet::new(1000, 2499), -0.3);
+                expected_chr3
+                    .aggregate(ContiguousIntegerSet::new(2500, 2999), 0.);
                 assert_eq!(chrom_to_interval_to_val["chr3"], expected_chr3);
             }
         }
@@ -307,13 +331,15 @@ mod tests {
 
             {
                 let mut expected_chr1 = IntegerIntervalMap::<f64>::new();
-                expected_chr1.aggregate(ContiguousIntegerSet::new(400, 449), -0.9);
+                expected_chr1
+                    .aggregate(ContiguousIntegerSet::new(400, 449), -0.9);
                 assert_eq!(chrom_to_interval_to_val["chr1"], expected_chr1);
             }
 
             {
                 let mut expected_chr3 = IntegerIntervalMap::<f64>::new();
-                expected_chr3.aggregate(ContiguousIntegerSet::new(2500, 2999), 0.3);
+                expected_chr3
+                    .aggregate(ContiguousIntegerSet::new(2500, 2999), 0.3);
                 assert_eq!(chrom_to_interval_to_val["chr3"], expected_chr3);
             }
         }

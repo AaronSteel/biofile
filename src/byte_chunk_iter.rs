@@ -19,7 +19,8 @@ impl<R: Seek> ByteChunkIter<R> {
         end_byte_index_exclusive: usize,
         chunk_size: usize,
     ) -> ByteChunkIter<R> {
-        let offset = buf.seek(SeekFrom::Start(start_byte_index as u64)).unwrap() as usize;
+        let offset = buf.seek(SeekFrom::Start(start_byte_index as u64)).unwrap()
+            as usize;
         assert_eq!(offset, start_byte_index);
         ByteChunkIter {
             start_byte_index,

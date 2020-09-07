@@ -1,7 +1,8 @@
 use math::traits::ToIterator;
 
 use crate::plink_bed::{
-    geno_to_lowest_two_bits, get_num_people_last_byte, lowest_two_bits_to_geno, usize_div_ceil,
+    geno_to_lowest_two_bits, get_num_people_last_byte, lowest_two_bits_to_geno,
+    usize_div_ceil,
 };
 
 pub struct PlinkSnps {
@@ -29,7 +30,8 @@ impl PlinkSnps {
         let num_bytes = usize_div_ceil(geno.len(), 4);
         let mut bytes: Vec<u8> = Vec::with_capacity(num_bytes);
         let mut snp_index = 0;
-        if let Some(num_people_last_byte) = get_num_people_last_byte(geno.len()) {
+        if let Some(num_people_last_byte) = get_num_people_last_byte(geno.len())
+        {
             for _ in 0..num_bytes - 1 {
                 bytes.push(
                     geno_to_lowest_two_bits(geno[snp_index])
@@ -42,7 +44,8 @@ impl PlinkSnps {
             // last byte
             let mut last_byte = 0u8;
             for j in 0..num_people_last_byte {
-                last_byte |= geno_to_lowest_two_bits(geno[snp_index + j]) << (j * 2);
+                last_byte |=
+                    geno_to_lowest_two_bits(geno[snp_index + j]) << (j * 2);
             }
             bytes.push(last_byte);
         }

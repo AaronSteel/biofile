@@ -6,7 +6,10 @@ use std::{
 
 use math::{
     partition::ordered_interval_partitions::OrderedIntervalPartitions,
-    set::{contiguous_integer_set::ContiguousIntegerSet, ordered_integer_set::OrderedIntegerSet},
+    set::{
+        contiguous_integer_set::ContiguousIntegerSet,
+        ordered_integer_set::OrderedIntegerSet,
+    },
 };
 
 use crate::{
@@ -50,7 +53,8 @@ impl PeakFile {
                         continue;
                     }
                 }
-                let interval_to_val = chrom_to_intervals.entry(chrom).or_insert_with(Vec::new);
+                let interval_to_val =
+                    chrom_to_intervals.entry(chrom).or_insert_with(Vec::new);
                 interval_to_val.push(ContiguousIntegerSet::new(start, end - 1));
             }
         }
@@ -59,7 +63,8 @@ impl PeakFile {
             chrom_to_partitions.insert(
                 chrom,
                 OrderedIntervalPartitions::from_vec_with_trusted_order(
-                    OrderedIntegerSet::from_contiguous_integer_sets(intervals).into_intervals(),
+                    OrderedIntegerSet::from_contiguous_integer_sets(intervals)
+                        .into_intervals(),
                 ),
             );
         }
@@ -180,7 +185,8 @@ mod tests {
                 )
             ).unwrap();
         }
-        let peak_file = PeakFile::new(file.path().to_str().unwrap().to_string());
+        let peak_file =
+            PeakFile::new(file.path().to_str().unwrap().to_string());
         let mut iter = peak_file.iter().unwrap();
         assert_eq!(
             Some(PeakFileDataLine {
@@ -251,7 +257,8 @@ mod tests {
                 )
             ).unwrap();
         }
-        let peak_file = PeakFile::new(file.path().to_str().unwrap().to_string());
+        let peak_file =
+            PeakFile::new(file.path().to_str().unwrap().to_string());
         let expected: HashMap<String, OrderedIntervalPartitions<usize>> = vec![
             (
                 "chr1",
