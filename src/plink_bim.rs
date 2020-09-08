@@ -179,7 +179,7 @@ impl PlinkBim {
                     }
                     Some(key) => partitions
                         .entry(key.to_owned())
-                        .or_insert(OrderedIntegerSet::new())
+                        .or_insert_with(OrderedIntegerSet::new)
                         .collect(file_line_offset + i as Coordinate),
                 }
             }
@@ -226,6 +226,7 @@ impl PlinkBim {
         &self.bim_path_list
     }
 
+    #[allow(clippy::iter_nth_zero)]
     pub fn get_all_chroms(&mut self) -> Result<HashSet<String>, Error> {
         Ok(self
             .get_buf_list()?
@@ -255,6 +256,7 @@ impl PlinkBim {
             .collect())
     }
 
+    #[allow(clippy::blocks_in_if_conditions, clippy::iter_nth_zero)]
     pub fn get_chrom_fileline_positions(
         &mut self,
         chrom: &str,

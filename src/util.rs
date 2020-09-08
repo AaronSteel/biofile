@@ -15,7 +15,7 @@ pub fn get_buf(filename: &str) -> Result<BufReader<File>, Error> {
     }
 }
 
-#[derive(PartialEq, Copy, Clone, Debug)]
+#[derive(Eq, PartialEq, Copy, Clone, Debug)]
 pub enum Strand {
     Positive,
     Negative,

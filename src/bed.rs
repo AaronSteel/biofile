@@ -25,6 +25,8 @@ use std::{
 
 pub mod bed_writer;
 
+pub use bed_writer::BedWriter;
+
 pub struct Bed {
     filepath: String,
 }
@@ -152,6 +154,7 @@ pub type Chrom = String;
 /// optional.
 ///
 /// The [start, end) is a zero-based left-closed right-open coordinate range.
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub struct BedDataLine<D> {
     pub chrom: Chrom,
     pub start: Coordinate,

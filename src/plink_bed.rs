@@ -80,10 +80,8 @@ impl PlinkBed {
                         .to_string(),
                 ));
             }
-            let num_people = num_people_set
-                .into_iter()
-                .map(|x| x)
-                .collect::<Vec<usize>>()[0];
+            let num_people =
+                num_people_set.into_iter().collect::<Vec<usize>>()[0];
             if num_people == 0 {
                 return Err(Error::Generic(
                     "cannot create PlinkBed with 0 people".to_string(),
@@ -950,7 +948,7 @@ mod tests {
             let path = NamedTempFile::new().unwrap().into_temp_path();
             let path_str = path.to_str().unwrap().to_string();
             PlinkBed::create_bed(&geno, &path_str).unwrap();
-            let geno_bed = PlinkBed::new(&vec![(
+            let geno_bed = PlinkBed::new(&[(
                 path_str,
                 bim.into_temp_path().to_str().unwrap().to_string(),
                 fam.into_temp_path().to_str().unwrap().to_string(),
@@ -1025,7 +1023,7 @@ mod tests {
         PlinkBed::create_bed(&geno_1, bed_path_1.to_str().unwrap()).unwrap();
         PlinkBed::create_bed(&geno_2, bed_path_2.to_str().unwrap()).unwrap();
 
-        let bed = PlinkBed::new(&vec![
+        let bed = PlinkBed::new(&[
             (
                 bed_path_1.to_str().unwrap().to_string(),
                 bim_path_1.to_str().unwrap().to_string(),
@@ -1057,7 +1055,7 @@ mod tests {
         let bed_path_str = bed_path.to_str().unwrap().to_string();
         PlinkBed::create_bed(&geno, &bed_path_str).unwrap();
 
-        let bed = PlinkBed::new(&vec![(
+        let bed = PlinkBed::new(&[(
             bed_path_str,
             bim.into_temp_path().to_str().unwrap().to_string(),
             fam.into_temp_path().to_str().unwrap().to_string(),
@@ -1100,12 +1098,10 @@ mod tests {
             .get_genotype_matrix(Some(snp_index_slices.clone()))
             .unwrap();
         let mut arr = Array::zeros((num_people, 35));
-        let mut jj = 0;
-        for j in snp_index_slices.to_iter() {
+        for (jj, j) in snp_index_slices.to_iter().enumerate() {
             for i in 0..num_people {
                 arr[[i, jj]] = true_geno_arr[[i, j]];
             }
-            jj += 1;
         }
         assert_eq!(arr, geno);
     }
@@ -1152,7 +1148,7 @@ mod tests {
     fn test_create_dominance_geno_bed() {
         fn test(geno: &Array<u8, Ix2>) {
             let (bed_path, bim_path, fam_path) = create_temp_geno_bfile(geno);
-            let geno_bed = PlinkBed::new(&vec![(
+            let geno_bed = PlinkBed::new(&[(
                 bed_path.to_str().unwrap().to_string(),
                 bim_path.to_str().unwrap().to_string(),
                 fam_path.to_str().unwrap().to_string(),
@@ -1163,7 +1159,7 @@ mod tests {
             geno_bed
                 .create_dominance_geno_bed(0, dominance_path.to_str().unwrap())
                 .unwrap();
-            let dominance_geno = PlinkBed::new(&vec![(
+            let dominance_geno = PlinkBed::new(&[(
                 dominance_path.to_str().unwrap().to_string(),
                 bim_path.to_str().unwrap().to_string(),
                 fam_path.to_str().unwrap().to_string(),
@@ -1245,7 +1241,7 @@ mod tests {
             );
             assert_arr_almost_eq_f32(&actual, &expected, eps);
 
-            let geno_bed = PlinkBed::new(&vec![(
+            let geno_bed = PlinkBed::new(&[(
                 bed_path.to_str().unwrap().to_string(),
                 bim_path.to_str().unwrap().to_string(),
                 fam_path.to_str().unwrap().to_string(),
