@@ -1,6 +1,6 @@
 [package]
 name = "biofile"
-version = "1.4.0"
+version = "1.4.1"
 authors = ["Aaron"]
 edition = "2018"
 license = "Apache-2.0"
@@ -10,7 +10,7 @@ repository = "https://github.com/Rustinante/biofile"
 [dependencies]
 ndarray = {version = "0.12.1"}
 rayon = "1.1.0"
-math = "0.8.1"
+math = "0.8.8"
 num = "0.2"
 
 [dev-dependencies]

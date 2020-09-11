@@ -6,25 +6,28 @@ use std::{
 };
 
 pub struct BedWriter {
-    pub path: String,
+    path: String,
     writer: BufWriter<File>,
     num_lines_written: i64,
 }
 
 impl BedWriter {
     pub fn new(path: &str) -> Result<Self, std::io::Error> {
+        let file = OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .open(path)?;
         let path_buf = std::fs::canonicalize(path)?;
         Ok(BedWriter {
             path: path_buf.to_str().unwrap().to_string(),
-            writer: BufWriter::new(
-                OpenOptions::new()
-                    .create(true)
-                    .truncate(true)
-                    .write(true)
-                    .open(path_buf)?,
-            ),
+            writer: BufWriter::new(file),
             num_lines_written: 0,
         })
+    }
+
+    pub fn canonical_path(&self) -> &str {
+        &self.path
     }
 
     pub fn write_bed_line<D: Float + std::fmt::Display>(
