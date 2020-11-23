@@ -24,6 +24,7 @@ use std::{
 };
 
 pub mod bed_writer;
+pub mod paired_end_collator;
 
 pub use bed_writer::BedWriter;
 
