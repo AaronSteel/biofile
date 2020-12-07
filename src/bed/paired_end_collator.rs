@@ -729,7 +729,9 @@ mod tests {
 
         let out_path = NamedTempFile::new().unwrap().into_temp_path();
         let out_path_str = out_path.to_str().unwrap().to_string();
-        let result = collator.write(&out_path_str, 75, 75, None, None).unwrap();
+        let result = collator
+            .write(&out_path_str, 75, 75, None, None, false)
+            .unwrap();
 
         let expected_data_lines = vec![
             data_line!("chr1", 174, 324, "id_1"),
