@@ -30,12 +30,17 @@ pub use bed_writer::BedWriter;
 
 pub struct Bed {
     filepath: String,
+
+    /// Every line in the BED file will contribute a unit score for the
+    /// corresponding interval.
+    binarize_score: bool,
 }
 
 impl Bed {
-    pub fn new(filepath: &str) -> Bed {
+    pub fn new(filepath: &str, use_binary_score: bool) -> Bed {
         Bed {
             filepath: filepath.to_string(),
+            binarize_score: use_binary_score,
         }
     }
 
@@ -137,6 +142,7 @@ where
         BedDataLineIter {
             buf: get_buf(&self.filepath).unwrap(),
             filename: self.filepath.clone(),
+            binarize_score: self.binarize_score,
             phantom: PhantomData,
         }
     }
@@ -168,6 +174,10 @@ pub struct BedDataLine<D> {
 pub struct BedDataLineIter<D> {
     buf: BufReader<File>,
     filename: String,
+
+    /// Every line in the BED file will contribute a unit score for the
+    /// corresponding interval.
+    binarize_score: bool,
     phantom: PhantomData<D>,
 }
 
@@ -199,8 +209,12 @@ impl<D: Float + FromStr<Err = E>, E: Debug> Iterator for BedDataLineIter<D> {
 
                 // optional fields
                 let name = toks.next().map(|name| name.to_string());
-                let score =
-                    toks.next().map(|score| score.parse::<D>().unwrap());
+                let score = if self.binarize_score {
+                    toks.next();
+                    Some(D::one())
+                } else {
+                    toks.next().map(|score| score.parse::<D>().unwrap())
+                };
                 let strand = toks.next().and_then(|strand| {
                     Strand::new(strand)
                         .expect("failed to parse the strand symbol")
@@ -286,7 +300,7 @@ mod tests {
                 ))
                 .unwrap();
         }
-        let bed = Bed::new(file.path().to_str().unwrap());
+        let bed = Bed::new(file.path().to_str().unwrap(), false);
         {
             let chrom_to_interval_to_val =
                 bed.get_chrom_to_interval_to_val(None).unwrap();
@@ -365,7 +379,7 @@ mod tests {
                 ))
                 .unwrap();
         }
-        let bed = Bed::new(file.path().to_str().unwrap());
+        let bed = Bed::new(file.path().to_str().unwrap(), false);
         let chrom_to_intervals = bed.get_chrom_to_intervals();
 
         let expected: HashMap<Chrom, OrderedIntegerSet<Coordinate>> = [

@@ -46,7 +46,7 @@ where {
         let mut num_pcr_duplicates = 0i64;
         let mut num_overlapping_pairs = 0i64;
 
-        let bed = Bed::new(&self.path);
+        let bed = Bed::new(&self.path, true);
         for BedDataLine {
             chrom,
             start,
@@ -84,11 +84,11 @@ where {
                     Some((pair_id, _index)) => {
                         let id_to_pair = chrom_to_id_to_pair
                             .entry(chrom.to_string())
-                            .or_insert_with(|| HashMap::new());
+                            .or_insert_with(HashMap::new);
 
                         let pair = id_to_pair
                             .entry(pair_id.clone())
-                            .or_insert_with(|| PairedEndReadPair::new());
+                            .or_insert_with(PairedEndReadPair::new);
 
                         match strand {
                             Strand::Positive => match pair.positive_strand {
@@ -176,7 +176,7 @@ where {
         let mut writer = BedWriter::new(out_path)?;
         for chrom in ordered_chroms.into_iter() {
             let sorted_id_pairs = chrom_to_sorted_id_pairs.get(&chrom).unwrap();
-            for (id, pair) in sorted_id_pairs.into_iter() {
+            for (id, pair) in sorted_id_pairs.iter() {
                 // the pair must cover a valid distance
                 if let Some(distance) = pair.distance_covered() {
                     distance_histogram.collect(distance);
@@ -695,7 +695,7 @@ mod tests {
                     start: $start,
                     end: $end,
                     name: Some($name.into()),
-                    score: Some(0.),
+                    score: Some(1.),
                     strand: None,
                 }
             };
@@ -740,7 +740,7 @@ mod tests {
             data_line!("chr2", 249, 399, "id_3"),
         ];
 
-        let bed = Bed::new(&out_path_str);
+        let bed = Bed::new(&out_path_str, true);
         let actual_data_lines: Vec<BedDataLine<f64>> =
             (bed.to_iter(): BedDataLineIter<f64>).collect();
 

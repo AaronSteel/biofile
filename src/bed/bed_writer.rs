@@ -107,7 +107,7 @@ mod tests {
             }
         }
         {
-            let bed = Bed::new(path.to_str().unwrap());
+            let bed = Bed::new(path.to_str().unwrap(), false);
             for (line, expected) in bed
                 .to_iter()
                 .zip(get_expected_bed_data_lines(&data_lines).iter())
