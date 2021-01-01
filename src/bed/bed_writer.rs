@@ -34,23 +34,23 @@ impl BedWriter {
         &mut self,
         data: &BedDataLine<D>,
     ) -> std::io::Result<usize> {
-        let mut line = format!("{} {} {}", data.chrom, data.start, data.end);
+        let mut line = format!("{}\t{}\t{}", data.chrom, data.start, data.end);
         match &data.name {
-            None => line.push_str(&format!(" id_{}", self.num_lines_written)),
-            Some(name) => line.push_str(&format!(" {}", name)),
+            None => line.push_str(&format!("\tid_{}", self.num_lines_written)),
+            Some(name) => line.push_str(&format!("\t{}", name)),
         };
         match data.score {
-            None => line.push_str(" 0"),
-            Some(score) => line.push_str(&format!(" {}", score)),
+            None => line.push_str("\t0"),
+            Some(score) => line.push_str(&format!("\t{}", score)),
         }
         match data.strand {
-            None => line.push_str(" ."),
+            None => line.push_str("\t."),
             Some(strand) => match strand {
                 Strand::Positive => {
-                    line.push_str(" +");
+                    line.push_str("\t+");
                 }
                 Strand::Negative => {
-                    line.push_str(" -");
+                    line.push_str("\t-");
                 }
             },
         }
