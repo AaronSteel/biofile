@@ -1,4 +1,4 @@
-use crate::{bed::BedDataLine, util::Strand};
+use crate::{bed::BedDataLine, bedgraph::BedGraphDataLine, util::Strand};
 use num::Float;
 use std::{
     fs::{File, OpenOptions},
@@ -58,12 +58,25 @@ impl BedWriter {
         self.num_lines_written += 1;
         self.writer.write(line.as_bytes())
     }
+
+    pub fn write_bedgraph_line<D: Float + std::fmt::Display>(
+        &mut self,
+        data: &BedGraphDataLine<D>,
+    ) -> std::io::Result<usize> {
+        let line = format!(
+            "{}\t{}\t{}\t{}\n",
+            data.chrom, data.start, data.end_exclusive, data.value
+        );
+        self.num_lines_written += 1;
+        self.writer.write(line.as_bytes())
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::{
         bed::{bed_writer::BedWriter, Bed, BedDataLine},
+        bedgraph::{BedGraph, BedGraphDataLine, BedGraphDataLineIter},
         util::Strand,
     };
     use math::traits::ToIterator;
@@ -116,6 +129,53 @@ mod tests {
             }
         }
         path.close().unwrap();
+    }
+
+    #[test]
+    fn test_write_bedgraph() {
+        let data_lines = vec![
+            BedGraphDataLine::<f32> {
+                chrom: "chr1".into(),
+                start: 3,
+                end_exclusive: 10,
+                value: 5.,
+            },
+            BedGraphDataLine {
+                chrom: "chr1".into(),
+                start: 0,
+                end_exclusive: 23,
+                value: 6.,
+            },
+            BedGraphDataLine {
+                chrom: "chr3".into(),
+                start: 100,
+                end_exclusive: 115,
+                value: 11.,
+            },
+            BedGraphDataLine {
+                chrom: "chr1".into(),
+                start: 100,
+                end_exclusive: 150,
+                value: 18.,
+            },
+        ];
+        let file = NamedTempFile::new().unwrap();
+        let path = file.into_temp_path();
+        {
+            let mut writer = BedWriter::new(path.to_str().unwrap()).unwrap();
+            for data in data_lines.iter() {
+                writer.write_bedgraph_line(data).unwrap();
+            }
+        }
+        {
+            let bedgraph = BedGraph::new(path.to_str().unwrap());
+            for (expected, line) in data_lines
+                .iter()
+                .zip(bedgraph.to_iter(): BedGraphDataLineIter<f32>)
+            {
+                assert_eq!(expected, &line);
+            }
+        }
     }
 
     fn get_expected_bed_data_lines<D: Copy + Num>(

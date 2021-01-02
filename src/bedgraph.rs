@@ -15,17 +15,17 @@ use std::{
     str::FromStr,
 };
 
-use crate::{error::Error, util::get_buf};
+use crate::util::get_buf;
 
 pub struct BedGraph {
     filepath: String,
 }
 
 impl BedGraph {
-    pub fn new(filepath: &str) -> Result<BedGraph, Error> {
-        Ok(BedGraph {
+    pub fn new(filepath: &str) -> BedGraph {
+        BedGraph {
             filepath: filepath.to_string(),
-        })
+        }
     }
 
     #[inline]
@@ -40,13 +40,20 @@ impl BedGraph {
         D: Float + FromStr<Err = E>,
         E: Debug, {
         let mut chrom_to_interval_to_val = HashMap::new();
-        for (chrom, start, end, val) in self.to_iter(): BedGraphDataLineIter<D>
+        for BedGraphDataLine {
+            chrom,
+            start,
+            end_exclusive,
+            value,
+        } in self.to_iter(): BedGraphDataLineIter<D>
         {
             let interval_to_val = chrom_to_interval_to_val
                 .entry(chrom)
                 .or_insert_with(IntegerIntervalMap::new);
-            interval_to_val
-                .aggregate(ContiguousIntegerSet::new(start, end - 1), val);
+            interval_to_val.aggregate(
+                ContiguousIntegerSet::new(start, end_exclusive - 1),
+                value,
+            );
         }
         chrom_to_interval_to_val
     }
@@ -75,12 +82,21 @@ where
 /// Data type of the Bedgraph coordinates
 pub type Coordinate = i64;
 
+/// Data type of the Bedgraph chromosomes
+pub type Chrom = String;
+
 /// The four-element tuple in the `BedGraphDataLine` corresponds to a line of
 /// data in the BedGraph file, where each line is of the form
 /// `chrom start end value`
 ///
 /// The [start, end) is a zero-based left-closed right-open coordinate range
-pub type BedGraphDataLine<D> = (String, Coordinate, Coordinate, D);
+#[derive(Clone, PartialEq, Debug)]
+pub struct BedGraphDataLine<D> {
+    pub chrom: Chrom,
+    pub start: Coordinate,
+    pub end_exclusive: Coordinate,
+    pub value: D,
+}
 
 pub struct BedGraphDataLineIter<D> {
     buf: BufReader<File>,
@@ -114,9 +130,15 @@ impl<D: Float + FromStr<Err = E>, E: Debug> Iterator
                     chrom.to_string()
                 };
                 let start = toks.next().unwrap().parse::<Coordinate>().unwrap();
-                let end = toks.next().unwrap().parse::<Coordinate>().unwrap();
+                let end_exclusive =
+                    toks.next().unwrap().parse::<Coordinate>().unwrap();
                 let value = toks.next().unwrap().parse::<D>().unwrap();
-                Some((chrom, start, end, value))
+                Some(BedGraphDataLine {
+                    chrom,
+                    start,
+                    end_exclusive,
+                    value,
+                })
             };
         }
     }
@@ -148,7 +170,7 @@ mod tests {
                 ))
                 .unwrap();
         }
-        let bedgraph = BedGraph::new(file.path().to_str().unwrap()).unwrap();
+        let bedgraph = BedGraph::new(file.path().to_str().unwrap());
         let chrom_to_interval_to_val = bedgraph.get_chrom_to_interval_to_val();
 
         let mut expected_chr1 = IntegerIntervalMap::<f64>::new();
