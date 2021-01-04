@@ -174,7 +174,18 @@ where {
 
         let mut distance_histogram = Histogram::new(None, 20, 0, 1000)?;
         let mut writer = BedWriter::new(out_path)?;
+
         for chrom in ordered_chroms.into_iter() {
+            // chrom, score, strand will remain unchanged
+            let mut data_line = BedDataLine {
+                chrom: chrom.to_string(),
+                start: 0,
+                end: 0,
+                name: None::<String>,
+                score: Some(1f32),
+                strand: None,
+            };
+
             let sorted_id_pairs = chrom_to_sorted_id_pairs.get(&chrom).unwrap();
             for (id, pair) in sorted_id_pairs.iter() {
                 // the pair must cover a valid distance
@@ -204,14 +215,10 @@ where {
 
                     let start = midpoint - left_offset;
                     let end = midpoint + right_offset;
-                    let data_line = BedDataLine {
-                        chrom: chrom.to_string(),
-                        start,
-                        end,
-                        name: Some(id.to_string()),
-                        score: None::<f64>,
-                        strand: None,
-                    };
+
+                    data_line.start = start;
+                    data_line.end = end;
+                    data_line.name = Some(id.to_string());
                     writer.write_bed_line(&data_line)?;
                 }
             }
@@ -740,7 +747,7 @@ mod tests {
             data_line!("chr2", 249, 399, "id_3"),
         ];
 
-        let bed = Bed::new(&out_path_str, true);
+        let bed = Bed::new(&out_path_str, false);
         let actual_data_lines: Vec<BedDataLine<f64>> =
             (bed.to_iter(): BedDataLineIter<f64>).collect();
 
