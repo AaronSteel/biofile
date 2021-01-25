@@ -3,7 +3,12 @@ use std::{
     io::BufReader,
 };
 
-use crate::error::Error;
+use crate::{bed::Bed, bedgraph::BedGraph, error::Error};
+
+pub enum TrackVariant {
+    Bed(Bed),
+    BedGraph(BedGraph),
+}
 
 pub fn get_buf(filename: &str) -> Result<BufReader<File>, Error> {
     match OpenOptions::new().read(true).open(filename) {
