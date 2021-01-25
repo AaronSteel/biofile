@@ -168,7 +168,7 @@ mod tests {
             }
         }
         {
-            let bedgraph = BedGraph::new(path.to_str().unwrap());
+            let bedgraph = BedGraph::new(path.to_str().unwrap(), false);
             for (expected, line) in data_lines
                 .iter()
                 .zip(bedgraph.to_iter(): BedGraphDataLineIter<f32>)

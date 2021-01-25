@@ -47,55 +47,6 @@ impl Bed {
         &self.filepath
     }
 
-    // /// Will discard the lines in the bed file if the corresponding range has
-    // a /// non-empty intersection with any of the intervals in `exclude`.
-    // pub fn get_chrom_to_interval_to_val<D, E>(
-    //     &self,
-    //     exclude: Option<&HashMap<Chrom, OrderedIntegerSet<Coordinate>>>,
-    // ) -> Result<HashMap<String, IntegerIntervalMap<D>>, Error>
-    // where
-    //     D: Float + FromStr<Err = E>,
-    //     E: Debug, {
-    //     let mut chrom_to_interval_map = HashMap::new();
-    //     for BedDataLine {
-    //         chrom,
-    //         start,
-    //         end,
-    //         name: _,
-    //         score,
-    //         strand: _,
-    //     } in self.to_iter(): BedDataLineIter<D>
-    //     {
-    //         let score = if let Some(score) = score {
-    //             score
-    //         } else {
-    //             return Err(Error::Generic(
-    //                 "the BED file does not have a score field".into(),
-    //             ));
-    //         };
-    //
-    //         let interval = ContiguousIntegerSet::new(start, end - 1);
-    //         if let Some(chrom_to_excluded_intervals) = exclude {
-    //             if let Some(excluded_intervals) =
-    //                 chrom_to_excluded_intervals.get(&chrom)
-    //             {
-    //                 if interval
-    //                     .has_non_empty_intersection_with(excluded_intervals)
-    //                 {
-    //                     continue;
-    //                 }
-    //             }
-    //         }
-    //
-    //         let interval_map = chrom_to_interval_map
-    //             .entry(chrom)
-    //             .or_insert_with(IntegerIntervalMap::new);
-    //
-    //         interval_map.aggregate(interval, score);
-    //     }
-    //     Ok(chrom_to_interval_map)
-    // }
-
     pub fn get_chrom_to_intervals(
         &self,
     ) -> HashMap<Chrom, OrderedIntegerSet<Coordinate>> {

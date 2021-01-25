@@ -19,12 +19,17 @@ use math::set::contiguous_integer_set::ContiguousIntegerSet;
 
 pub struct BedGraph {
     filepath: String,
+
+    /// Every line in the bedgraph file will contribute a unit score for the
+    /// corresponding interval.
+    binarize_score: bool,
 }
 
 impl BedGraph {
-    pub fn new(filepath: &str) -> BedGraph {
+    pub fn new(filepath: &str, binarize_score: bool) -> BedGraph {
         BedGraph {
             filepath: filepath.to_string(),
+            binarize_score,
         }
     }
 
@@ -49,6 +54,7 @@ where
         BedGraphDataLineIter {
             buf,
             filename: self.filepath.clone(),
+            binarize_score: self.binarize_score,
             phantom: PhantomData,
         }
     }
@@ -103,6 +109,10 @@ pub struct BedGraphDataLine<D> {
 pub struct BedGraphDataLineIter<D> {
     buf: BufReader<File>,
     filename: String,
+
+    /// Every line in the bedgraph file will contribute a unit score for the
+    /// corresponding interval.
+    binarize_score: bool,
     phantom: PhantomData<D>,
 }
 
@@ -134,7 +144,13 @@ impl<D: Float + FromStr<Err = E>, E: Debug> Iterator
                 let start = toks.next().unwrap().parse::<Coordinate>().unwrap();
                 let end_exclusive =
                     toks.next().unwrap().parse::<Coordinate>().unwrap();
-                let value = toks.next().unwrap().parse::<D>().unwrap();
+
+                let value = if self.binarize_score {
+                    D::one()
+                } else {
+                    toks.next().unwrap().parse::<D>().unwrap()
+                };
+
                 Some(BedGraphDataLine {
                     chrom,
                     start,
@@ -175,7 +191,7 @@ mod tests {
                 ))
                 .unwrap();
         }
-        let bedgraph = BedGraph::new(file.path().to_str().unwrap());
+        let bedgraph = BedGraph::new(file.path().to_str().unwrap(), false);
         let chrom_to_interval_to_val =
             ToChromIntervalValueIter::get_chrom_to_interval_to_val(
                 &bedgraph, None,
@@ -212,7 +228,7 @@ mod tests {
                 ))
                 .unwrap();
         }
-        let bedgraph = BedGraph::new(file.path().to_str().unwrap());
+        let bedgraph = BedGraph::new(file.path().to_str().unwrap(), false);
         let mut iter: BedGraphDataLineIter<f64> =
             bedgraph.to_chrom_interval_value_iter();
 
@@ -254,4 +270,6 @@ mod tests {
         );
         assert_eq!(iter.next(), None);
     }
+
+    // TODO: test binarize_score
 }
