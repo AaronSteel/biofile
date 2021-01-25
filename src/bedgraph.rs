@@ -1,13 +1,9 @@
 //! An interface to the BedGraph track format file as specified in
 //! https://genome.ucsc.edu/goldenPath/help/bedgraph.html
 
-use math::{
-    partition::integer_interval_map::IntegerIntervalMap,
-    set::contiguous_integer_set::ContiguousIntegerSet, traits::ToIterator,
-};
+use math::traits::ToIterator;
 use num::Float;
 use std::{
-    collections::HashMap,
     fmt::Debug,
     fs::File,
     io::{BufRead, BufReader},
@@ -15,7 +11,11 @@ use std::{
     str::FromStr,
 };
 
-use crate::util::get_buf;
+use crate::{
+    iter::{ChromIntervalValue, ToChromIntervalValueIter},
+    util::get_buf,
+};
+use math::set::contiguous_integer_set::ContiguousIntegerSet;
 
 pub struct BedGraph {
     filepath: String,
@@ -31,31 +31,6 @@ impl BedGraph {
     #[inline]
     pub fn get_filepath(&self) -> &str {
         &self.filepath
-    }
-
-    pub fn get_chrom_to_interval_to_val<D, E>(
-        &self,
-    ) -> HashMap<String, IntegerIntervalMap<D>>
-    where
-        D: Float + FromStr<Err = E>,
-        E: Debug, {
-        let mut chrom_to_interval_to_val = HashMap::new();
-        for BedGraphDataLine {
-            chrom,
-            start,
-            end_exclusive,
-            value,
-        } in self.to_iter(): BedGraphDataLineIter<D>
-        {
-            let interval_to_val = chrom_to_interval_to_val
-                .entry(chrom)
-                .or_insert_with(IntegerIntervalMap::new);
-            interval_to_val.aggregate(
-                ContiguousIntegerSet::new(start, end_exclusive - 1),
-                value,
-            );
-        }
-        chrom_to_interval_to_val
     }
 }
 
@@ -76,6 +51,33 @@ where
             filename: self.filepath.clone(),
             phantom: PhantomData,
         }
+    }
+}
+
+impl<V: Float + FromStr<Err = E>, E: Debug>
+    ToChromIntervalValueIter<
+        BedGraphDataLineIter<V>,
+        BedGraphDataLine<V>,
+        Coordinate,
+        V,
+    > for BedGraph
+{
+    fn to_chrom_interval_value_iter(&self) -> BedGraphDataLineIter<V> {
+        self.to_iter()
+    }
+}
+
+impl<V: Copy + Float + FromStr<Err = E>, E: Debug>
+    ChromIntervalValue<Coordinate, V> for BedGraphDataLine<V>
+{
+    fn chrom_interval_value(
+        &self,
+    ) -> (Chrom, ContiguousIntegerSet<Coordinate>, V) {
+        (
+            self.chrom.clone(),
+            ContiguousIntegerSet::new(self.start, self.end_exclusive - 1),
+            self.value,
+        )
     }
 }
 
@@ -146,7 +148,10 @@ impl<D: Float + FromStr<Err = E>, E: Debug> Iterator
 
 #[cfg(test)]
 mod tests {
-    use crate::bedgraph::BedGraph;
+    use crate::{
+        bedgraph::{BedGraph, BedGraphDataLineIter},
+        iter::{ChromIntervalValue, ToChromIntervalValueIter},
+    };
     use math::{
         partition::integer_interval_map::IntegerIntervalMap,
         set::contiguous_integer_set::ContiguousIntegerSet,
@@ -171,7 +176,11 @@ mod tests {
                 .unwrap();
         }
         let bedgraph = BedGraph::new(file.path().to_str().unwrap());
-        let chrom_to_interval_to_val = bedgraph.get_chrom_to_interval_to_val();
+        let chrom_to_interval_to_val =
+            ToChromIntervalValueIter::get_chrom_to_interval_to_val(
+                &bedgraph, None,
+            )
+            .unwrap();
 
         let mut expected_chr1 = IntegerIntervalMap::<f64>::new();
         expected_chr1.aggregate(ContiguousIntegerSet::new(100, 149), 3.5);
@@ -185,5 +194,64 @@ mod tests {
         expected_chr3.aggregate(ContiguousIntegerSet::new(2500, 2999), 0.);
         assert_eq!(chrom_to_interval_to_val["chr1"], expected_chr1);
         assert_eq!(chrom_to_interval_to_val["chr3"], expected_chr3);
+    }
+
+    #[test]
+    fn test_bedgraph_to_chrom_interval_value_iter() {
+        let file = NamedTempFile::new().unwrap();
+        {
+            let mut writer = BufWriter::new(&file);
+            writer
+                .write_fmt(format_args!(
+                    "chr1 100 200 3.5\n\
+                    chr1 150 250 2\n\
+                    chr1 200 350 4.0\n\
+                    chr3 1000 3000 -0.3\n\
+                    chr1 400 450 -0.9\n\
+                    chr3 2500 3000 0.3\n"
+                ))
+                .unwrap();
+        }
+        let bedgraph = BedGraph::new(file.path().to_str().unwrap());
+        let mut iter: BedGraphDataLineIter<f64> =
+            bedgraph.to_chrom_interval_value_iter();
+
+        assert_eq!(
+            iter.next().unwrap().chrom_interval_value(),
+            ("chr1".to_string(), ContiguousIntegerSet::new(100, 199), 3.5)
+        );
+        assert_eq!(
+            iter.next().unwrap().chrom_interval_value(),
+            ("chr1".to_string(), ContiguousIntegerSet::new(150, 249), 2.)
+        );
+        assert_eq!(
+            iter.next().unwrap().chrom_interval_value(),
+            ("chr1".to_string(), ContiguousIntegerSet::new(200, 349), 4.)
+        );
+        assert_eq!(
+            iter.next().unwrap().chrom_interval_value(),
+            (
+                "chr3".to_string(),
+                ContiguousIntegerSet::new(1000, 2999),
+                -0.3
+            )
+        );
+        assert_eq!(
+            iter.next().unwrap().chrom_interval_value(),
+            (
+                "chr1".to_string(),
+                ContiguousIntegerSet::new(400, 449),
+                -0.9
+            )
+        );
+        assert_eq!(
+            iter.next().unwrap().chrom_interval_value(),
+            (
+                "chr3".to_string(),
+                ContiguousIntegerSet::new(2500, 2999),
+                0.3
+            )
+        );
+        assert_eq!(iter.next(), None);
     }
 }

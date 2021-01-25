@@ -5,6 +5,7 @@ pub mod bed;
 pub mod bedgraph;
 pub mod byte_chunk_iter;
 pub mod error;
+pub mod iter;
 pub mod peak_file;
 pub mod plink_bed;
 pub mod plink_bim;

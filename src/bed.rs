@@ -1,15 +1,12 @@
 //! An interface to the BED track format file as specified in
 //! https://genome.ucsc.edu/FAQ/FAQformat.html#format1
 
-use crate::{
-    error::Error,
-    util::{get_buf, Strand},
-};
+use crate::util::{get_buf, Strand};
 use math::{
     partition::integer_interval_map::IntegerIntervalMap,
     set::{
         contiguous_integer_set::ContiguousIntegerSet,
-        ordered_integer_set::OrderedIntegerSet, traits::Intersect,
+        ordered_integer_set::OrderedIntegerSet,
     },
     traits::ToIterator,
 };
@@ -26,6 +23,7 @@ use std::{
 pub mod bed_writer;
 pub mod paired_end_collator;
 
+use crate::iter::{ChromIntervalValue, ToChromIntervalValueIter};
 pub use bed_writer::BedWriter;
 
 pub struct Bed {
@@ -49,54 +47,54 @@ impl Bed {
         &self.filepath
     }
 
-    /// Will discard the lines in the bed file if the corresponding range has a
-    /// non-empty intersection with any of the intervals in `exclude`.
-    pub fn get_chrom_to_interval_to_val<D, E>(
-        &self,
-        exclude: Option<&HashMap<Chrom, OrderedIntegerSet<Coordinate>>>,
-    ) -> Result<HashMap<String, IntegerIntervalMap<D>>, Error>
-    where
-        D: Float + FromStr<Err = E>,
-        E: Debug, {
-        let mut chrom_to_interval_map = HashMap::new();
-        for BedDataLine {
-            chrom,
-            start,
-            end,
-            name: _,
-            score,
-            strand: _,
-        } in self.to_iter(): BedDataLineIter<D>
-        {
-            let score = if let Some(score) = score {
-                score
-            } else {
-                return Err(Error::Generic(
-                    "the BED file does not have a score field".into(),
-                ));
-            };
-
-            let interval = ContiguousIntegerSet::new(start, end - 1);
-            if let Some(chrom_to_excluded_intervals) = exclude {
-                if let Some(excluded_intervals) =
-                    chrom_to_excluded_intervals.get(&chrom)
-                {
-                    if interval
-                        .has_non_empty_intersection_with(excluded_intervals)
-                    {
-                        continue;
-                    }
-                }
-            }
-
-            let interval_map = chrom_to_interval_map
-                .entry(chrom)
-                .or_insert_with(IntegerIntervalMap::new);
-
-            interval_map.aggregate(interval, score);
-        }
-        Ok(chrom_to_interval_map)
-    }
+    // /// Will discard the lines in the bed file if the corresponding range has
+    // a /// non-empty intersection with any of the intervals in `exclude`.
+    // pub fn get_chrom_to_interval_to_val<D, E>(
+    //     &self,
+    //     exclude: Option<&HashMap<Chrom, OrderedIntegerSet<Coordinate>>>,
+    // ) -> Result<HashMap<String, IntegerIntervalMap<D>>, Error>
+    // where
+    //     D: Float + FromStr<Err = E>,
+    //     E: Debug, {
+    //     let mut chrom_to_interval_map = HashMap::new();
+    //     for BedDataLine {
+    //         chrom,
+    //         start,
+    //         end,
+    //         name: _,
+    //         score,
+    //         strand: _,
+    //     } in self.to_iter(): BedDataLineIter<D>
+    //     {
+    //         let score = if let Some(score) = score {
+    //             score
+    //         } else {
+    //             return Err(Error::Generic(
+    //                 "the BED file does not have a score field".into(),
+    //             ));
+    //         };
+    //
+    //         let interval = ContiguousIntegerSet::new(start, end - 1);
+    //         if let Some(chrom_to_excluded_intervals) = exclude {
+    //             if let Some(excluded_intervals) =
+    //                 chrom_to_excluded_intervals.get(&chrom)
+    //             {
+    //                 if interval
+    //                     .has_non_empty_intersection_with(excluded_intervals)
+    //                 {
+    //                     continue;
+    //                 }
+    //             }
+    //         }
+    //
+    //         let interval_map = chrom_to_interval_map
+    //             .entry(chrom)
+    //             .or_insert_with(IntegerIntervalMap::new);
+    //
+    //         interval_map.aggregate(interval, score);
+    //     }
+    //     Ok(chrom_to_interval_map)
+    // }
 
     pub fn get_chrom_to_intervals(
         &self,
@@ -145,6 +143,30 @@ where
             binarize_score: self.binarize_score,
             phantom: PhantomData,
         }
+    }
+}
+
+impl<V: Float + FromStr<Err = E>, E: Debug>
+    ToChromIntervalValueIter<BedDataLineIter<V>, BedDataLine<V>, Coordinate, V>
+    for Bed
+{
+    fn to_chrom_interval_value_iter(&self) -> BedDataLineIter<V> {
+        self.to_iter()
+    }
+}
+
+impl<V: Copy + Float + FromStr<Err = E>, E: Debug>
+    ChromIntervalValue<Coordinate, V> for BedDataLine<V>
+{
+    fn chrom_interval_value(
+        &self,
+    ) -> (Chrom, ContiguousIntegerSet<Coordinate>, V) {
+        let score = self.score.expect("BED file is missing the score field");
+        (
+            self.chrom.clone(),
+            ContiguousIntegerSet::new(self.start, self.end - 1),
+            score,
+        )
     }
 }
 
@@ -270,7 +292,10 @@ impl Iterator for BedCoordinateIter {
 
 #[cfg(test)]
 mod tests {
-    use crate::bed::{Bed, Chrom, Coordinate};
+    use crate::{
+        bed::{Bed, Chrom, Coordinate},
+        iter::{ChromIntervalValue, ToChromIntervalValueIter},
+    };
     use math::{
         partition::integer_interval_map::IntegerIntervalMap,
         set::{
@@ -303,7 +328,10 @@ mod tests {
         let bed = Bed::new(file.path().to_str().unwrap(), false);
         {
             let chrom_to_interval_to_val =
-                bed.get_chrom_to_interval_to_val(None).unwrap();
+                ToChromIntervalValueIter::get_chrom_to_interval_to_val(
+                    &bed, None,
+                )
+                .unwrap();
             {
                 let mut expected_chr1 = IntegerIntervalMap::<f64>::new();
                 expected_chr1
@@ -343,8 +371,11 @@ mod tests {
             .cloned()
             .collect();
 
-            let chrom_to_interval_to_val = bed
-                .get_chrom_to_interval_to_val(Some(exclude).as_ref())
+            let chrom_to_interval_to_val =
+                ToChromIntervalValueIter::get_chrom_to_interval_to_val(
+                    &bed,
+                    Some(exclude).as_ref(),
+                )
                 .unwrap();
 
             {
@@ -397,5 +428,62 @@ mod tests {
         .collect();
 
         assert_eq!(chrom_to_intervals, expected);
+    }
+
+    #[test]
+    fn test_bed_to_chrom_interval_value_iter() {
+        let file = NamedTempFile::new().unwrap();
+        {
+            let mut writer = BufWriter::new(&file);
+            writer
+                .write_fmt(format_args!(
+                    "chr1 100 200 name_1 3.5\n\
+                    chr1 150 250 name_2 2\n\
+                    chr1 200 350 name_3 4.0\n\
+                    chr3 1000 3000 name_4 -0.3\n\
+                    chr1 400 450 name_5 -0.9\n\
+                    chr3 2500 3000 name_6 0.3\n"
+                ))
+                .unwrap();
+        }
+        let bed = Bed::new(file.path().to_str().unwrap(), false);
+        let mut iter = bed.to_chrom_interval_value_iter();
+        assert_eq!(
+            iter.next().unwrap().chrom_interval_value(),
+            ("chr1".to_string(), ContiguousIntegerSet::new(100, 199), 3.5)
+        );
+        assert_eq!(
+            iter.next().unwrap().chrom_interval_value(),
+            ("chr1".to_string(), ContiguousIntegerSet::new(150, 249), 2.)
+        );
+        assert_eq!(
+            iter.next().unwrap().chrom_interval_value(),
+            ("chr1".to_string(), ContiguousIntegerSet::new(200, 349), 4.)
+        );
+        assert_eq!(
+            iter.next().unwrap().chrom_interval_value(),
+            (
+                "chr3".to_string(),
+                ContiguousIntegerSet::new(1000, 2999),
+                -0.3
+            )
+        );
+        assert_eq!(
+            iter.next().unwrap().chrom_interval_value(),
+            (
+                "chr1".to_string(),
+                ContiguousIntegerSet::new(400, 449),
+                -0.9
+            )
+        );
+        assert_eq!(
+            iter.next().unwrap().chrom_interval_value(),
+            (
+                "chr3".to_string(),
+                ContiguousIntegerSet::new(2500, 2999),
+                0.3
+            )
+        );
+        assert_eq!(iter.next(), None);
     }
 }
